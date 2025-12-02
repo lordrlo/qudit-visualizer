@@ -1,7 +1,11 @@
 // src/App.tsx
 import React, { useEffect, useRef, useState } from "react";
 import { runSimulation } from "./api";
-import type { SimulationResponse } from "./api";
+import type {
+  SimulationResponse,
+  InitialStateType,
+  ComplexNumber,
+} from "./api";
 import { WignerHeatmap } from "./components/WignerHeatmap";
 
 const containerStyle: React.CSSProperties = {
@@ -14,7 +18,7 @@ const containerStyle: React.CSSProperties = {
 };
 
 const sidebarStyle: React.CSSProperties = {
-  width: 280,
+  width: 320,
   padding: 16,
   boxSizing: "border-box",
   borderRight: "1px solid #374151",
@@ -65,9 +69,14 @@ const DEFAULT_STEPS = 201;
 
 export const App: React.FC = () => {
   const [d, setD] = useState(3);
+
   const [initialType, setInitialType] =
-    useState<"basis" | "equal_superposition">("basis");
+    useState<InitialStateType>("basis");
   const [basisIndex, setBasisIndex] = useState(0);
+
+  // custom state amplitudes: arrays of length d
+  const [psiRe, setPsiRe] = useState<number[]>([1, 0, 0]); // default |0>
+  const [psiIm, setPsiIm] = useState<number[]>([0, 0, 0]);
 
   const [simData, setSimData] = useState<SimulationResponse | null>(null);
   const [frame, setFrame] = useState(0);
@@ -81,9 +90,38 @@ export const App: React.FC = () => {
 
   const nSteps = simData?.ts.length ?? DEFAULT_STEPS;
 
+  // Resize psi arrays when d changes
+  useEffect(() => {
+    setBasisIndex(0);
+
+    setPsiRe((old) => {
+      const arr = [...old];
+      if (arr.length < d) {
+        while (arr.length < d) arr.push(0);
+      } else if (arr.length > d) {
+        arr.length = d;
+      }
+
+      const allZero = arr.reduce((acc, v) => acc && v === 0, true);
+      if (allZero && arr.length > 0) {
+        arr[0] = 1;
+      }
+      return arr;
+    });
+
+    setPsiIm((old) => {
+      const arr = [...old];
+      if (arr.length < d) {
+        while (arr.length < d) arr.push(0);
+      } else if (arr.length > d) {
+        arr.length = d;
+      }
+      return arr;
+    });
+  }, [d]);
+
   // Animation loop over frames
   useEffect(() => {
-    // If not playing or no data, stop animation
     if (!playing || !simData) {
       if (frameIdRef.current != null) {
         cancelAnimationFrame(frameIdRef.current);
@@ -101,11 +139,13 @@ export const App: React.FC = () => {
         lastTimeRef.current = timestamp;
 
         const dt = (dtMs / 1000) * speed; // physical time increment
-        const totalTime = simData.ts[simData.ts.length - 1] || 1;
-        const framesPerSecond = (simData.ts.length - 1) / totalTime;
+        const totalTime =
+          simData.ts[simData.ts.length - 1] || 1;
+        const framesPerSecond =
+          (simData.ts.length - 1) / totalTime;
         const dFrame = dt * framesPerSecond;
 
-        setFrame(prev => {
+        setFrame((prev) => {
           let next = prev + dFrame;
           if (next >= nSteps) next -= nSteps;
           return next;
@@ -115,10 +155,8 @@ export const App: React.FC = () => {
       frameIdRef.current = requestAnimationFrame(loop);
     };
 
-    // start animation
     frameIdRef.current = requestAnimationFrame(loop);
 
-    // cleanup: cancel *current* frame request
     return () => {
       if (frameIdRef.current != null) {
         cancelAnimationFrame(frameIdRef.current);
@@ -127,13 +165,21 @@ export const App: React.FC = () => {
     };
   }, [playing, speed, simData, nSteps]);
 
-
   async function handleRun() {
     setLoading(true);
     setErrorMsg(null);
     setPlaying(false);
     setFrame(0);
     try {
+      // build psi_custom if needed
+      let psi_custom: ComplexNumber[] | undefined = undefined;
+      if (initialType === "custom") {
+        psi_custom = Array.from({ length: d }).map((_, q) => ({
+          re: psiRe[q] ?? 0,
+          im: psiIm[q] ?? 0,
+        }));
+      }
+
       const res = await runSimulation({
         d,
         hamiltonian: "diagonal_quadratic",
@@ -141,7 +187,9 @@ export const App: React.FC = () => {
         basis_index: basisIndex,
         t_max: DEFAULT_T_MAX,
         n_steps: DEFAULT_STEPS,
+        psi_custom,
       });
+
       setSimData(res);
     } catch (err: any) {
       setErrorMsg(err.message ?? String(err));
@@ -174,6 +222,7 @@ export const App: React.FC = () => {
           Discrete Wigner Visualizer
         </h1>
 
+        {/* Dimension */}
         <div style={{ marginBottom: 12 }}>
           <label style={labelStyle}>Dimension d (odd)</label>
           <select
@@ -181,7 +230,6 @@ export const App: React.FC = () => {
             onChange={(e) => {
               const nd = parseInt(e.target.value, 10);
               setD(nd);
-              setBasisIndex(0);
               setSimData(null);
               setFrame(0);
             }}
@@ -202,12 +250,13 @@ export const App: React.FC = () => {
           </select>
         </div>
 
+        {/* Initial state */}
         <div style={{ marginBottom: 12 }}>
           <label style={labelStyle}>Initial state</label>
           <select
             value={initialType}
             onChange={(e) =>
-              setInitialType(e.target.value as "basis" | "equal_superposition")
+              setInitialType(e.target.value as InitialStateType)
             }
             style={{
               width: "100%",
@@ -219,7 +268,10 @@ export const App: React.FC = () => {
             }}
           >
             <option value="basis">Basis state |q⟩</option>
-            <option value="equal_superposition">Equal superposition</option>
+            <option value="equal_superposition">
+              Equal superposition
+            </option>
+            <option value="custom">Custom amplitudes</option>
           </select>
 
           {initialType === "basis" && (
@@ -239,8 +291,82 @@ export const App: React.FC = () => {
               />
             </div>
           )}
+
+          {initialType === "custom" && (
+            <div style={{ marginTop: 8 }}>
+              <div
+                style={{
+                  ...smallTextStyle,
+                  marginBottom: 4,
+                }}
+              >
+                Enter amplitudes ψ = Σ₍q₎ (a₍q₎ + i b₍q₎) |q⟩. The state is
+                normalized automatically.
+              </div>
+              {Array.from({ length: d }).map((_, q) => (
+                <div
+                  key={q}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 4,
+                    marginBottom: 4,
+                  }}
+                >
+                  <span style={{ fontSize: 12 }}>|{q}⟩:</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={psiRe[q]}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value || "0");
+                      setPsiRe((prev) => {
+                        const arr = [...prev];
+                        arr[q] = isNaN(v) ? 0 : v;
+                        return arr;
+                      });
+                    }}
+                    style={{
+                      width: 70,
+                      padding: "2px 4px",
+                      borderRadius: 4,
+                      border: "1px solid #4b5563",
+                      background: "#020617",
+                      color: "#e5e7eb",
+                      fontSize: 12,
+                    }}
+                    placeholder="Re"
+                  />
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={psiIm[q]}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value || "0");
+                      setPsiIm((prev) => {
+                        const arr = [...prev];
+                        arr[q] = isNaN(v) ? 0 : v;
+                        return arr;
+                      });
+                    }}
+                    style={{
+                      width: 70,
+                      padding: "2px 4px",
+                      borderRadius: 4,
+                      border: "1px solid #4b5563",
+                      background: "#020617",
+                      color: "#e5e7eb",
+                      fontSize: 12,
+                    }}
+                    placeholder="Im"
+                  />
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
+        {/* Run button */}
         <div style={{ marginBottom: 12 }}>
           <button
             onClick={handleRun}
@@ -254,6 +380,7 @@ export const App: React.FC = () => {
           </button>
         </div>
 
+        {/* Time + play controls */}
         {simData && (
           <>
             <div style={{ marginBottom: 12 }}>
@@ -272,7 +399,14 @@ export const App: React.FC = () => {
               />
             </div>
 
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <div
+              style={{
+                display: "flex",
+                gap: 8,
+                alignItems: "center",
+                marginBottom: 8,
+              }}
+            >
               <button
                 onClick={() => setPlaying((p) => !p)}
                 style={playButtonStyle}
@@ -287,7 +421,9 @@ export const App: React.FC = () => {
                   max={4}
                   step={0.1}
                   value={speed}
-                  onChange={(e) => setSpeed(parseFloat(e.target.value))}
+                  onChange={(e) =>
+                    setSpeed(parseFloat(e.target.value))
+                  }
                   style={{ marginLeft: 8 }}
                 />
               </div>
@@ -309,9 +445,10 @@ export const App: React.FC = () => {
         )}
 
         <p style={{ ...smallTextStyle, marginTop: 16 }}>
-          Backend (FastAPI + Dynamiqs) solves Schrödinger's equation for a
-          d-dimensional qudit. The frontend shows the discrete Wigner function
-          W(q,p; t) as an interactive heatmap.
+          Backend (FastAPI + Dynamiqs) solves Schrödinger&apos;s equation
+          for a d-dimensional qudit with a fixed diagonal Hamiltonian.
+          The frontend shows the discrete Wigner function W(q,p; t) as an
+          interactive heatmap.
         </p>
       </div>
 
@@ -328,7 +465,3 @@ export const App: React.FC = () => {
     </div>
   );
 };
-<p style={{ ...smallTextStyle, marginTop: 16 }}>
-  W(q,p) = (1/d) Tr[ρ A<sub>q,p</sub>] is a real quasi-probability on the
-  discrete phase space (q,p). Red = positive, blue = negative.
-</p>

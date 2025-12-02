@@ -21,10 +21,11 @@ Initial version (this repo) supports:
   - Energies: `E_k = k^2 / d` for `k = 0, 1, ..., d-1`
   - Hamiltonian matrix: `H = diag(E_0, ..., E_{d-1})`
 
-- Two initial state presets:
+- Three initial state presets:
 
   - **Basis state** `|q0>` in the computational basis
   - **Equal superposition** `(1/sqrt(d)) * sum_q |q>`
+  - **Custom state** specifying amplitudes for each basis element
 
 - **Discrete Wigner function**
 

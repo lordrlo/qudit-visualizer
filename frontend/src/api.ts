@@ -1,19 +1,28 @@
-// src/api.ts
 import { API_BASE } from "./config";
+
+export type InitialStateType = "basis" | "equal_superposition" | "custom";
+
+export interface ComplexNumber {
+  re: number;
+  im: number;
+}
 
 export interface SimulationRequest {
   d: number;
   hamiltonian: "diagonal_quadratic";
-  initial_state: "basis" | "equal_superposition";
+  initial_state: InitialStateType;
   basis_index?: number;
   t_max?: number;
   n_steps?: number;
+
+  // only used when initial_state === "custom"
+  psi_custom?: ComplexNumber[];
 }
 
 export interface SimulationResponse {
   d: number;
   ts: number[];
-  W: number[][][]; // [n_steps][d][d]
+  W: number[][][];
 }
 
 export async function runSimulation(
