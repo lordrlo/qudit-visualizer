@@ -4,14 +4,14 @@ from fastapi.middleware.cors import CORSMiddleware
 import dynamiqs as dq
 import jax.numpy as jnp
 
-from models import (
+from backend.models import (
     SimulationRequest,
     SimulationResponse,
     GateRequest,
     GateResponse,
     ComplexNumber,
 )
-from wigner import phase_point_ops, wigner_from_rho
+from backend.wigner import phase_point_ops, wigner_from_rho
 
 app = FastAPI(title="Discrete Wigner Simulator")
 
@@ -187,7 +187,7 @@ def simulate(req: SimulationRequest):
 @app.post("/apply_gate", response_model=GateResponse)
 def apply_gate(req: GateRequest):
     d = req.d
-    
+
     if len(req.psi) != d:
         raise HTTPException(status_code=400, detail="psi must have length d.")
 
