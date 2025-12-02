@@ -112,8 +112,36 @@ def simulate(req: SimulationRequest):
     if d % 2 == 0:
         raise HTTPException(status_code=400, detail="Only odd d supported currently.")
 
-    # Build H and initial state
-    H, _energies = build_hamiltonian(d, req.hamiltonian)
+    # Build H
+    if req.hamiltonian == "custom":
+        if req.H_custom is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Custom Hamiltonian requires H_custom matrix."
+            )
+        if len(req.H_custom) != d or any(len(row) != d for row in req.H_custom):
+            raise HTTPException(
+                status_code=400,
+                detail="H_custom must be a d×d matrix."
+            )
+
+        H = jnp.array(
+            [
+                [c.re + 1j * c.im for c in row]
+                for row in req.H_custom
+            ],
+            dtype=jnp.complex64,
+        )
+
+        # Optionally enforce Hermiticity softly:
+        H = 0.5 * (H + jnp.conjugate(H.T))
+
+    else:
+        H, _energies = build_hamiltonian(d, req.hamiltonian)
+        # ensure complex dtype
+        H = jnp.array(H, dtype=jnp.complex64)
+
+    # Build initial state
     try:
         psi0 = build_initial_state(
             d,

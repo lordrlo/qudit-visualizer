@@ -14,6 +14,7 @@ import { create, all } from "mathjs";
 const math = create(all, {});
 
 type Mode = "continuous" | "gates";
+type HamiltonianType = "diagonal_quadratic" | "custom";
 
 const containerStyle: React.CSSProperties = {
   display: "flex",
@@ -145,6 +146,30 @@ export const App: React.FC = () => {
     useState<InitialStateType>("basis");
   const [basisIndex, setBasisIndex] = useState(0);
 
+  // Hamiltonian choice for continuous mode
+  const [hamiltonianType, setHamiltonianType] =
+    useState<HamiltonianType>("diagonal_quadratic");
+
+  // Custom Hamiltonian H matrix (driven by expressions)
+  const [HRe, setHRe] = useState<number[][]>([
+    [0, 0, 0],
+    [0, 0, 0],
+    [0, 0, 0],
+  ]);
+  const [HIm, setHIm] = useState<number[][]>([
+    [0, 0, 0],
+    [0, 0, 0],
+    [0, 0, 0],
+  ]);
+  const [HExpr, setHExpr] = useState<string[][]>([
+    ["0", "0", "0"],
+    ["0", "0", "0"],
+    ["0", "0", "0"],
+  ]);
+
+  // Final time for continuous evolution
+  const [tMax, setTMax] = useState<number>(DEFAULT_T_MAX);
+
   // Coherent-state parameters (q,p)
   const [cohQ, setCohQ] = useState(0);
   const [cohP, setCohP] = useState(0);
@@ -205,6 +230,22 @@ export const App: React.FC = () => {
     setGateRe(idRe);
     setGateIm(idIm);
     setGateExpr(expr);
+  }, [d]);
+
+  // Keep custom Hamiltonian sized to d x d (init to 0)
+  useEffect(() => {
+    const hre = Array.from({ length: d }, () =>
+      Array.from({ length: d }, () => 0)
+    );
+    const him = Array.from({ length: d }, () =>
+      Array.from({ length: d }, () => 0)
+    );
+    const hexpr = Array.from({ length: d }, () =>
+      Array.from({ length: d }, () => "0")
+    );
+    setHRe(hre);
+    setHIm(him);
+    setHExpr(hexpr);
   }, [d]);
 
   // ---- Helper: preview Wigner for current ψ (single time t=0) ----
@@ -353,8 +394,10 @@ export const App: React.FC = () => {
       newIm = Array(nd).fill(0);
       newExpr = Array(nd).fill(`1/sqrt(${nd})`);
     } else if (initialType === "coherent") {
-      const q = Math.min(cohQ, nd - 1);
-      const p = Math.min(cohP, nd - 1);
+      const q =
+        nd > 0 ? Math.min(cohQ, nd - 1) : 0;
+      const p =
+        nd > 0 ? Math.min(cohP, nd - 1) : 0;
       const coh = buildCoherentState(nd, q, p);
       newRe = coh.re;
       newIm = coh.im;
@@ -538,6 +581,34 @@ export const App: React.FC = () => {
     });
   }
 
+  // ---- Custom Hamiltonian matrix expression editing ----
+
+  function handleHamiltonianExpressionChange(
+    i: number,
+    j: number,
+    expr: string
+  ) {
+    setHExpr((prev) => {
+      const m = prev.map((row) => [...row]);
+      m[i][j] = expr;
+      return m;
+    });
+
+    const parsed = parseComplexExpression(expr);
+    if (!parsed) return;
+
+    setHRe((prev) => {
+      const m = prev.map((row) => [...row]);
+      m[i][j] = parsed.re;
+      return m;
+    });
+    setHIm((prev) => {
+      const m = prev.map((row) => [...row]);
+      m[i][j] = parsed.im;
+      return m;
+    });
+  }
+
   // ---- Continuous evolution from current state ----
 
   async function handleRun() {
@@ -553,14 +624,31 @@ export const App: React.FC = () => {
         })
       );
 
+      // clamp tMax to something positive
+      const tEnd = tMax > 0 ? tMax : DEFAULT_T_MAX;
+
+      let hamiltonian = "diagonal_quadratic";
+      let H_custom: ComplexNumber[][] | undefined;
+
+      if (hamiltonianType === "custom") {
+        hamiltonian = "custom";
+        H_custom = HRe.map((row, i) =>
+          row.map((re, j) => ({
+            re,
+            im: HIm[i]?.[j] ?? 0,
+          }))
+        );
+      }
+
       const res = await runSimulation({
         d,
-        hamiltonian: "diagonal_quadratic",
+        hamiltonian,
         initial_state: "custom",
         basis_index: 0,
-        t_max: DEFAULT_T_MAX,
+        t_max: tEnd,
         n_steps: DEFAULT_STEPS,
         psi_custom,
+        H_custom,
       });
 
       setSimData(res);
@@ -803,8 +891,7 @@ export const App: React.FC = () => {
                 Specify amplitudes ψ = Σ (a₍q₎ + i b₍q₎) |q⟩ using
                 expressions, e.g. <code>exp(i*pi/3)/sqrt(2)</code>,{" "}
                 <code>e^(2)/sqrt(3)</code>, or <code>1/2+ i*sqrt(3)/2</code>.
-                The state is normalized on the
-                backend.
+                The state is normalized on the backend.
               </div>
               {Array.from({ length: d }).map((_, q) => (
                 <div
@@ -826,7 +913,7 @@ export const App: React.FC = () => {
                     onChange={(e) =>
                       handlePsiExpressionChange(q, e.target.value)
                     }
-                    placeholder="e^(i*pi/3)/sqrt(2)"
+                    placeholder="exp(i*pi/3)/sqrt(2)"
                     style={{
                       minWidth: 180,
                       padding: "2px 4px",
@@ -870,6 +957,125 @@ export const App: React.FC = () => {
         {/* Continuous mode controls */}
         {mode === "continuous" && (
           <>
+            {/* t_max input */}
+            <div style={{ marginBottom: 8 }}>
+              <label style={labelStyle}>Final time t_max</label>
+              <input
+                type="number"
+                value={tMax}
+                min={0}
+                step={0.1}
+                onChange={(e) => {
+                  const v = parseFloat(e.target.value);
+                  setTMax(Number.isFinite(v) ? v : DEFAULT_T_MAX);
+                }}
+                style={{
+                  width: "100%",
+                  padding: "4px 6px",
+                  borderRadius: 4,
+                  border: "1px solid #4b5563",
+                  background: "#020617",
+                  color: "#e5e7eb",
+                }}
+              />
+              <div style={{ ...smallTextStyle, marginTop: 2 }}>
+                Total evolution time for the trajectory ψ(tₙ). Units are
+                arbitrary but consistent with your H.
+              </div>
+            </div>
+
+            {/* Hamiltonian selector */}
+            <div style={{ marginBottom: 8 }}>
+              <label style={labelStyle}>Hamiltonian</label>
+              <select
+                value={hamiltonianType}
+                onChange={(e) =>
+                  setHamiltonianType(
+                    e.target.value as HamiltonianType
+                  )
+                }
+                style={{
+                  width: "100%",
+                  padding: "4px 6px",
+                  borderRadius: 4,
+                  border: "1px solid #4b5563",
+                  background: "#020617",
+                  color: "#e5e7eb",
+                }}
+              >
+                <option value="diagonal_quadratic">
+                  Built-in: H₍q,q₎ ∝ q² / d
+                </option>
+                <option value="custom">Custom Hamiltonian H</option>
+              </select>
+            </div>
+
+            {hamiltonianType === "custom" && (
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ ...smallTextStyle, marginBottom: 4 }}>
+                  Edit H₍q,q&apos;₎ as expressions, e.g.{" "}
+                  <code>0</code>, <code>1</code>,{" "}
+                  <code>exp(i*pi/3)</code>. No Hermiticity check is
+                  enforced; you probably want H = H†.
+                </div>
+                <div
+                  style={{
+                    maxHeight: 160,
+                    overflowY: "auto",
+                    border: "1px solid #4b5563",
+                    borderRadius: 4,
+                    padding: 4,
+                  }}
+                >
+                  {Array.from({ length: d }).map((_, i) => (
+                    <div
+                      key={i}
+                      style={{
+                        display: "flex",
+                        gap: 4,
+                        marginBottom: 4,
+                        alignItems: "center",
+                      }}
+                    >
+                      <span style={{ fontSize: 10 }}>row {i}</span>
+                      {Array.from({ length: d }).map((_, j) => (
+                        <div
+                          key={j}
+                          style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 2,
+                          }}
+                        >
+                          <input
+                            type="text"
+                            value={HExpr[i]?.[j] ?? ""}
+                            onChange={(e) =>
+                              handleHamiltonianExpressionChange(
+                                i,
+                                j,
+                                e.target.value
+                              )
+                            }
+                            placeholder={i === j ? "0" : "0"}
+                            style={{
+                              width: 80,
+                              padding: "1px 3px",
+                              borderRadius: 4,
+                              border: "1px solid #4b5563",
+                              background: "#020617",
+                              color: "#e5e7eb",
+                              fontSize: 10,
+                            }}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div style={{ marginBottom: 12 }}>
               <button
                 onClick={handleRun}
@@ -1066,12 +1272,12 @@ export const App: React.FC = () => {
 
         <p style={{ ...smallTextStyle, marginTop: 16 }}>
           The Wigner plot always shows the current state ψ. Continuous
-          evolution computes a trajectory ψ(tₙ) and lets you move along it
-          in time; gate mode applies preset unitaries (X, Y, Z, F, T) or a
-          custom unitary U directly to ψ. Expressions like{" "}
-          <code>e^(i*pi/3)</code>, <code>0.5 + i*sqrt(3)/2</code>, or{" "}
-          <code>Exp[I*Pi/3]</code> are supported for both the state and
-          the unitary.
+          evolution computes a trajectory ψ(tₙ) up to tₙ ≤ t_max and lets
+          you move along it in time; gate mode applies preset unitaries
+          (X, Y, Z, F, T) or a custom unitary U directly to ψ. Custom
+          Hamiltonians H(q,q&apos;) and custom gates are specified with
+          expressions using <code>i</code>, <code>pi</code>,{" "}
+          <code>exp</code>, <code>sqrt</code>, etc.
         </p>
       </div>
 

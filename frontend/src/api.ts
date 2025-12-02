@@ -14,12 +14,13 @@ export type GateName = "X" | "Y" | "Z" | "F" | "T" | "custom";
 
 export interface SimulationRequest {
   d: number;
-  hamiltonian: string;
-  initial_state: "custom"; // we always send custom, using psi_custom
+  hamiltonian: string; // "diagonal_quadratic" | "custom"
+  initial_state: "custom";
   basis_index: number;
   t_max: number;
   n_steps: number;
   psi_custom: ComplexNumber[];
+  H_custom?: ComplexNumber[][]; // NEW: only used if hamiltonian === "custom"
 }
 
 export interface SimulationResponse {
