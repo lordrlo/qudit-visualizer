@@ -67,7 +67,6 @@ def build_initial_state(
         raise ValueError(f"Unknown initial state type: {initial_type}")
 
 
-
 def apply_gate_to_psi(psi: jnp.ndarray, gate: str, d: int) -> jnp.ndarray:
     """
     psi: column vector shape (d, 1)
@@ -105,7 +104,8 @@ def apply_gate_to_psi(psi: jnp.ndarray, gate: str, d: int) -> jnp.ndarray:
 
     else:
         raise ValueError(f"Unknown gate: {gate}")
-    
+
+
 @app.post("/simulate", response_model=SimulationResponse)
 def simulate(req: SimulationRequest):
     d = req.d
@@ -123,7 +123,6 @@ def simulate(req: SimulationRequest):
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-
 
     # Time grid
     tsave = jnp.linspace(0.0, req.t_max, req.n_steps)
@@ -144,10 +143,10 @@ def simulate(req: SimulationRequest):
         W_list.append(W.tolist())
 
         psi_list.append([
-            ComplexNumber(
-                re=float(jnp.real(z)),
-                im=float(jnp.imag(z))
-            )
+            {
+                "re": float(jnp.real(z)),
+                "im": float(jnp.imag(z)),
+            }
             for z in psi_t
         ])
 
@@ -157,6 +156,7 @@ def simulate(req: SimulationRequest):
         W=W_list,
         psi=psi_list,
     )
+
 
 @app.post("/apply_gate", response_model=GateResponse)
 def apply_gate(req: GateRequest):
@@ -179,11 +179,41 @@ def apply_gate(req: GateRequest):
         raise HTTPException(status_code=400, detail="Input state has zero norm.")
     psi = psi / norm
 
-    # apply gate
-    try:
-        psi_new = apply_gate_to_psi(psi, req.gate, d)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    # apply gate: preset vs custom
+    if req.gate == "custom":
+        # --- custom unitary path ---
+        if req.U is None:
+            raise HTTPException(status_code=400, detail="Custom gate requires U.")
+
+        if len(req.U) != d or any(len(row) != d for row in req.U):
+            raise HTTPException(
+                status_code=400,
+                detail="Custom gate U must be a d×d matrix.",
+            )
+
+        # build JAX complex matrix from U
+        U = jnp.array(
+            [
+                [u.re + 1j * u.im for u in row]
+                for row in req.U
+            ],
+            dtype=jnp.complex64,
+        )
+
+        psi_new = U @ psi
+
+    else:
+        # --- preset gates: X, Y, Z, F, T ---
+        try:
+            psi_new = apply_gate_to_psi(psi, req.gate, d)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+    # normalize output (in case U is not exactly unitary)
+    norm_new = jnp.linalg.norm(psi_new)
+    if norm_new == 0:
+        raise HTTPException(status_code=400, detail="Output state has zero norm.")
+    psi_new = psi_new / norm_new
 
     # compute Wigner for the new state
     A = phase_point_ops(d)
@@ -191,11 +221,14 @@ def apply_gate(req: GateRequest):
     W = wigner_from_rho(rho, A)  # shape (d, d)
 
     # convert psi_new back to list[ComplexNumber]
-    psi_list: list[ComplexNumber] = []
+    psi_list: list[dict] = []
     psi_flat = psi_new[:, 0]
     for z in psi_flat:
         psi_list.append(
-            ComplexNumber(re=float(jnp.real(z)), im=float(jnp.imag(z)))
+            {
+                "re": float(jnp.real(z)),
+                "im": float(jnp.imag(z)),
+            }
         )
 
     return GateResponse(

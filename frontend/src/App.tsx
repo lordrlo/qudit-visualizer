@@ -9,6 +9,10 @@ import type {
 } from "./api";
 import { WignerHeatmap } from "./components/WignerHeatmap";
 
+import { create, all } from "mathjs";
+
+const math = create(all, {});
+
 type Mode = "continuous" | "gates";
 
 const containerStyle: React.CSSProperties = {
@@ -70,6 +74,68 @@ const rangeStyle: React.CSSProperties = {
 const DEFAULT_T_MAX = 10;
 const DEFAULT_STEPS = 201;
 
+function parseComplexExpression(
+  expr: string
+): { re: number; im: number } | null {
+  let s = expr.trim();
+  if (!s) return null;
+
+  // Single convention:
+  // - imaginary unit: i
+  // - constants: pi
+  // - functions: exp, sqrt, sin, cos, ...
+  // Small convenience: allow capital I as alias of i
+  s = s.replace(/\bI\b/g, "i");
+
+  // Optional convenience: treat e^(...) as exp(...),
+  // but the *documented* convention is exp(...)
+  s = s.replace(/e\^\s*\(/g, "exp(");
+
+  try {
+    const val = math.evaluate(s);
+
+    if (math.isComplex(val)) {
+      return { re: Number(val.re), im: Number(val.im) };
+    }
+
+    if (typeof val === "number") {
+      return { re: Number(val), im: 0 };
+    }
+
+    if ((val as any)?.valueOf) {
+      const v = (val as any).valueOf();
+      if (typeof v === "number") {
+        return { re: v, im: 0 };
+      }
+    }
+
+    return null;
+  } catch (e) {
+    console.error("Failed to parse complex expression:", expr, "→", s, e);
+    return null;
+  }
+}
+
+// Coherent state |q,p> = D_{q,p} |0> with vacuum = |0>
+// Using D_{q,p} ~ Z^p X^q => psi[n] = 0 for n != q, psi[q] = exp(2π i p q / d)
+function buildCoherentState(
+  d: number,
+  q0: number,
+  p0: number
+): { re: number[]; im: number[] } {
+  const re = new Array<number>(d).fill(0);
+  const im = new Array<number>(d).fill(0);
+
+  const q = ((q0 % d) + d) % d;
+  const p = ((p0 % d) + d) % d;
+
+  const theta = (2 * Math.PI * p * q) / d;
+  re[q] = Math.cos(theta);
+  im[q] = Math.sin(theta);
+
+  return { re, im };
+}
+
 export const App: React.FC = () => {
   const [mode, setMode] = useState<Mode>("continuous");
 
@@ -79,13 +145,35 @@ export const App: React.FC = () => {
     useState<InitialStateType>("basis");
   const [basisIndex, setBasisIndex] = useState(0);
 
+  // Coherent-state parameters (q,p)
+  const [cohQ, setCohQ] = useState(0);
+  const [cohP, setCohP] = useState(0);
+
   // Canonical "current state" ψ(q) = psiRe[q] + i psiIm[q]
   const [psiRe, setPsiRe] = useState<number[]>([1, 0, 0]); // |0>
   const [psiIm, setPsiIm] = useState<number[]>([0, 0, 0]);
 
-  // Separate editor arrays for custom amplitudes (what the user types)
+  // Custom amplitudes: internal numeric + expression-as-typed
   const [customRe, setCustomRe] = useState<number[]>([1, 0, 0]);
   const [customIm, setCustomIm] = useState<number[]>([0, 0, 0]);
+  const [customExpr, setCustomExpr] = useState<string[]>(["1", "0", "0"]);
+
+  // Custom gate matrix editor: U_ij = gateRe[i][j] + i gateIm[i][j], driven by expressions
+  const [gateRe, setGateRe] = useState<number[][]>([
+    [1, 0, 0],
+    [0, 1, 0],
+    [0, 0, 1],
+  ]);
+  const [gateIm, setGateIm] = useState<number[][]>([
+    [0, 0, 0],
+    [0, 0, 0],
+    [0, 0, 0],
+  ]);
+  const [gateExpr, setGateExpr] = useState<string[][]>([
+    ["1", "0", "0"],
+    ["0", "1", "0"],
+    ["0", "0", "1"],
+  ]);
 
   // Trajectory / single-shot result from backend
   const [simData, setSimData] = useState<SimulationResponse | null>(
@@ -102,6 +190,22 @@ export const App: React.FC = () => {
   const frameIdRef = useRef<number | null>(null);
 
   const nSteps = simData?.ts.length ?? 0;
+
+  // Keep custom gate matrix sized to d x d (reset to identity on d change)
+  useEffect(() => {
+    const idRe = Array.from({ length: d }, (_, i) =>
+      Array.from({ length: d }, (_, j) => (i === j ? 1 : 0))
+    );
+    const idIm = Array.from({ length: d }, () =>
+      Array.from({ length: d }, () => 0)
+    );
+    const expr = Array.from({ length: d }, (_, i) =>
+      Array.from({ length: d }, (_, j) => (i === j ? "1" : "0"))
+    );
+    setGateRe(idRe);
+    setGateIm(idIm);
+    setGateExpr(expr);
+  }, [d]);
 
   // ---- Helper: preview Wigner for current ψ (single time t=0) ----
 
@@ -182,6 +286,7 @@ export const App: React.FC = () => {
       !simData ||
       mode !== "continuous" ||
       !simData.ts ||
+      !simData.ts.length ||
       simData.ts.length <= 1
     ) {
       if (frameIdRef.current != null) {
@@ -233,22 +338,42 @@ export const App: React.FC = () => {
   function handleDimensionChange(nd: number) {
     let newRe: number[] = [];
     let newIm: number[] = [];
+    let newExpr: string[] = [];
 
     if (initialType === "basis") {
       const idx = Math.min(basisIndex, nd - 1);
       newRe = Array(nd).fill(0);
       newRe[idx] = 1;
       newIm = Array(nd).fill(0);
+      newExpr = Array(nd).fill("0");
+      newExpr[idx] = "1";
     } else if (initialType === "equal_superposition") {
       const amp = 1 / Math.sqrt(nd);
       newRe = Array(nd).fill(amp);
       newIm = Array(nd).fill(0);
+      newExpr = Array(nd).fill(`1/sqrt(${nd})`);
+    } else if (initialType === "coherent") {
+      const q = Math.min(cohQ, nd - 1);
+      const p = Math.min(cohP, nd - 1);
+      const coh = buildCoherentState(nd, q, p);
+      newRe = coh.re;
+      newIm = coh.im;
+      newExpr = newRe.map((val, i) => {
+        const im = newIm[i];
+        if (Math.abs(val) < 1e-12 && Math.abs(im) < 1e-12) return "0";
+        if (Math.abs(im) < 1e-12) return `${val}`;
+        return `${val}+i*${im}`;
+      });
+      setCohQ(q);
+      setCohP(p);
     } else {
       // "custom" – keep as much as possible from custom editor
       newRe = customRe.slice(0, nd);
       newIm = customIm.slice(0, nd);
+      newExpr = customExpr.slice(0, nd);
       while (newRe.length < nd) newRe.push(0);
       while (newIm.length < nd) newIm.push(0);
+      while (newExpr.length < nd) newExpr.push("0");
     }
 
     setD(nd);
@@ -257,37 +382,59 @@ export const App: React.FC = () => {
     setPsiIm(newIm);
     setCustomRe(newRe);
     setCustomIm(newIm);
+    setCustomExpr(newExpr);
     setPlaying(false);
     setSimData(null); // old trajectory no longer valid
   }
 
-  // ---- Initial type changes presets ----
+  // ---- Initial type changes presets (basis / equal / coherent / custom) ----
 
   function handleInitialTypeChange(newType: InitialStateType) {
-    let newRe = [...psiRe];
-    let newIm = [...psiIm];
+    let newRe: number[] = [];
+    let newIm: number[] = [];
+    let newExpr: string[] = [];
 
     if (newType === "basis") {
       newRe = Array(d).fill(0);
       newRe[Math.min(basisIndex, d - 1)] = 1;
       newIm = Array(d).fill(0);
-      setCustomRe(newRe);
-      setCustomIm(newIm);
+      newExpr = Array(d).fill("0");
+      newExpr[Math.min(basisIndex, d - 1)] = "1";
     } else if (newType === "equal_superposition") {
       const amp = 1 / Math.sqrt(d);
       newRe = Array(d).fill(amp);
       newIm = Array(d).fill(0);
-      setCustomRe(newRe);
-      setCustomIm(newIm);
+      newExpr = Array(d).fill(`1/sqrt(${d})`);
+    } else if (newType === "coherent") {
+      const q = Math.min(cohQ, d - 1);
+      const p = Math.min(cohP, d - 1);
+      const coh = buildCoherentState(d, q, p);
+      newRe = coh.re;
+      newIm = coh.im;
+      newExpr = newRe.map((val, i) => {
+        const im = newIm[i];
+        if (Math.abs(val) < 1e-12 && Math.abs(im) < 1e-12) return "0";
+        if (Math.abs(im) < 1e-12) return `${val}`;
+        return `${val}+i*${im}`;
+      });
     } else {
       // "custom": start from current ψ
-      setCustomRe([...psiRe]);
-      setCustomIm([...psiIm]);
+      newRe = [...psiRe];
+      newIm = [...psiIm];
+      newExpr = newRe.map((val, i) => {
+        const im = newIm[i];
+        if (Math.abs(val) < 1e-12 && Math.abs(im) < 1e-12) return "0";
+        if (Math.abs(im) < 1e-12) return `${val}`;
+        return `${val}+i*${im}`;
+      });
     }
 
     setInitialType(newType);
     setPsiRe(newRe);
     setPsiIm(newIm);
+    setCustomRe(newRe);
+    setCustomIm(newIm);
+    setCustomExpr(newExpr);
     setPlaying(false);
     setSimData(null);
   }
@@ -299,41 +446,96 @@ export const App: React.FC = () => {
     const newRe = Array(d).fill(0);
     newRe[clamped] = 1;
     const newIm = Array(d).fill(0);
+    const newExpr = Array(d).fill("0");
+    newExpr[clamped] = "1";
 
     setBasisIndex(clamped);
     setPsiRe(newRe);
     setPsiIm(newIm);
     setCustomRe(newRe);
     setCustomIm(newIm);
+    setCustomExpr(newExpr);
     setPlaying(false);
     setSimData(null);
   }
 
-  // ---- Custom amplitude editing (editor only) ----
+  // ---- Coherent state parameter changes ----
 
-  function handlePsiComponentChange(
-    q: number,
-    part: "re" | "im",
-    value: number
-  ) {
+  function handleCoherentChange(kind: "q" | "p", value: number) {
+    const q = kind === "q" ? Math.min(Math.max(value, 0), d - 1) : cohQ;
+    const p = kind === "p" ? Math.min(Math.max(value, 0), d - 1) : cohP;
+
+    setCohQ(q);
+    setCohP(p);
+
+    const coh = buildCoherentState(d, q, p);
+    const newRe = coh.re;
+    const newIm = coh.im;
+    const newExpr = newRe.map((val, i) => {
+      const im = newIm[i];
+      if (Math.abs(val) < 1e-12 && Math.abs(im) < 1e-12) return "0";
+      if (Math.abs(im) < 1e-12) return `${val}`;
+      return `${val}+i*${im}`;
+    });
+
+    setPsiRe(newRe);
+    setPsiIm(newIm);
+    setCustomRe(newRe);
+    setCustomIm(newIm);
+    setCustomExpr(newExpr);
+    setPlaying(false);
+    setSimData(null);
+  }
+
+  // ---- Custom amplitude expression editing ----
+
+  function handlePsiExpressionChange(q: number, expr: string) {
+    const exprArr = [...customExpr];
+    exprArr[q] = expr;
+    setCustomExpr(exprArr);
+
+    const parsed = parseComplexExpression(expr);
+    if (!parsed) return;
+
     const newCustomRe = [...customRe];
     const newCustomIm = [...customIm];
-
-    if (part === "re") newCustomRe[q] = value;
-    else newCustomIm[q] = value;
-
+    newCustomRe[q] = parsed.re;
+    newCustomIm[q] = parsed.im;
     setCustomRe(newCustomRe);
     setCustomIm(newCustomIm);
 
-    // Canonical ψ is whatever the user typed (possibly unnormalized);
-    // the backend + preview will normalize for the Wigner.
-    const newPsiRe = [...newCustomRe];
-    const newPsiIm = [...newCustomIm];
-
-    setPsiRe(newPsiRe);
-    setPsiIm(newPsiIm);
+    setPsiRe([...newCustomRe]);
+    setPsiIm([...newCustomIm]);
     setPlaying(false);
     setSimData(null);
+  }
+
+  // ---- Custom gate matrix expression editing ----
+
+  function handleGateExpressionChange(
+    i: number,
+    j: number,
+    expr: string
+  ) {
+    setGateExpr((prev) => {
+      const m = prev.map((row) => [...row]);
+      m[i][j] = expr;
+      return m;
+    });
+
+    const parsed = parseComplexExpression(expr);
+    if (!parsed) return;
+
+    setGateRe((prev) => {
+      const m = prev.map((row) => [...row]);
+      m[i][j] = parsed.re;
+      return m;
+    });
+    setGateIm((prev) => {
+      const m = prev.map((row) => [...row]);
+      m[i][j] = parsed.im;
+      return m;
+    });
   }
 
   // ---- Continuous evolution from current state ----
@@ -371,9 +573,12 @@ export const App: React.FC = () => {
     }
   }
 
-  // ---- Single-shot gate application ----
+  // ---- Single-shot gate application (preset & custom) ----
 
-  async function handleApplyGate(gate: GateName) {
+  async function handleApplyGate(
+    gate: GateName,
+    U?: ComplexNumber[][]
+  ) {
     try {
       setLoading(true);
       setErrorMsg(null);
@@ -390,6 +595,7 @@ export const App: React.FC = () => {
         d,
         gate,
         psi,
+        U,
       });
 
       // new current state
@@ -398,10 +604,7 @@ export const App: React.FC = () => {
       setPsiRe(newRe);
       setPsiIm(newIm);
 
-      // Note: we do NOT touch customRe/customIm here,
-      // so the "chooser" keeps the initial specification.
-
-      // show its Wigner as a single-step trajectory
+      // Wigner of resulting state
       const fakeSim: SimulationResponse = {
         d: res.d,
         ts: [0],
@@ -415,6 +618,17 @@ export const App: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function handleApplyCustomGate() {
+    const U: ComplexNumber[][] = gateRe.map((row, i) =>
+      row.map((re, j) => ({
+        re,
+        im: gateIm[i]?.[j] ?? 0,
+      }))
+    );
+
+    await handleApplyGate("custom" as GateName, U);
   }
 
   const currentIndex =
@@ -434,6 +648,8 @@ export const App: React.FC = () => {
     simData && simData.ts.length > 0
       ? simData.ts[currentIndex]
       : 0;
+
+  const presetGates: GateName[] = ["X", "Y", "Z", "F", "T"];
 
   return (
     <div style={containerStyle}>
@@ -464,7 +680,7 @@ export const App: React.FC = () => {
               Continuous evolution (Hamiltonian)
             </option>
             <option value="gates">
-              Gate mode (X, Y, Z, F, T)
+              Gate mode (X, Y, Z, F, T, custom)
             </option>
           </select>
         </div>
@@ -515,6 +731,7 @@ export const App: React.FC = () => {
             <option value="equal_superposition">
               Equal superposition
             </option>
+            <option value="coherent">Coherent state |q,p⟩</option>
             <option value="custom">Custom amplitudes</option>
           </select>
 
@@ -536,6 +753,45 @@ export const App: React.FC = () => {
             </div>
           )}
 
+          {initialType === "coherent" && (
+            <div style={{ marginTop: 8 }}>
+              <div style={{ ...smallTextStyle, marginBottom: 4 }}>
+                Coherent states |q,p⟩ = D₍q,p₎ |0⟩, with |0⟩ the q = 0
+                computational basis state.
+              </div>
+              <div style={{ marginBottom: 8 }}>
+                <label style={{ ...labelStyle, fontSize: 12 }}>
+                  q (position-like): {cohQ}
+                </label>
+                <input
+                  type="range"
+                  min={0}
+                  max={d - 1}
+                  value={cohQ}
+                  onChange={(e) =>
+                    handleCoherentChange("q", parseInt(e.target.value, 10))
+                  }
+                  style={rangeStyle}
+                />
+              </div>
+              <div>
+                <label style={{ ...labelStyle, fontSize: 12 }}>
+                  p (momentum-like): {cohP}
+                </label>
+                <input
+                  type="range"
+                  min={0}
+                  max={d - 1}
+                  value={cohP}
+                  onChange={(e) =>
+                    handleCoherentChange("p", parseInt(e.target.value, 10))
+                  }
+                  style={rangeStyle}
+                />
+              </div>
+            </div>
+          )}
+
           {initialType === "custom" && (
             <div style={{ marginTop: 8 }}>
               <div
@@ -544,9 +800,11 @@ export const App: React.FC = () => {
                   marginBottom: 4,
                 }}
               >
-                Enter amplitudes ψ = Σ (a₍q₎ + i b₍q₎) |q⟩.
-                The state is normalized on the backend, but these
-                fields keep exactly what you type.
+                Specify amplitudes ψ = Σ (a₍q₎ + i b₍q₎) |q⟩ using
+                expressions, e.g. <code>exp(i*pi/3)/sqrt(2)</code>,{" "}
+                <code>e^(2)/sqrt(3)</code>, or <code>1/2+ i*sqrt(3)/2</code>.
+                The state is normalized on the
+                backend.
               </div>
               {Array.from({ length: d }).map((_, q) => (
                 <div
@@ -556,22 +814,21 @@ export const App: React.FC = () => {
                     alignItems: "center",
                     gap: 4,
                     marginBottom: 4,
+                    flexWrap: "wrap",
                   }}
                 >
                   <span style={{ fontSize: 12 }}>|{q}⟩:</span>
+
+                  {/* Expression input */}
                   <input
-                    type="number"
-                    step="0.01"
-                    value={customRe[q] ?? 0}
+                    type="text"
+                    value={customExpr[q] ?? ""}
                     onChange={(e) =>
-                      handlePsiComponentChange(
-                        q,
-                        "re",
-                        parseFloat(e.target.value || "0")
-                      )
+                      handlePsiExpressionChange(q, e.target.value)
                     }
+                    placeholder="e^(i*pi/3)/sqrt(2)"
                     style={{
-                      width: 70,
+                      minWidth: 180,
                       padding: "2px 4px",
                       borderRadius: 4,
                       border: "1px solid #4b5563",
@@ -579,29 +836,6 @@ export const App: React.FC = () => {
                       color: "#e5e7eb",
                       fontSize: 12,
                     }}
-                    placeholder="Re"
-                  />
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={customIm[q] ?? 0}
-                    onChange={(e) =>
-                      handlePsiComponentChange(
-                        q,
-                        "im",
-                        parseFloat(e.target.value || "0")
-                      )
-                    }
-                    style={{
-                      width: 70,
-                      padding: "2px 4px",
-                      borderRadius: 4,
-                      border: "1px solid #4b5563",
-                      background: "#020617",
-                      color: "#e5e7eb",
-                      fontSize: 12,
-                    }}
-                    placeholder="Im"
                   />
                 </div>
               ))}
@@ -704,7 +938,7 @@ export const App: React.FC = () => {
         {/* Gate mode controls */}
         {mode === "gates" && (
           <div style={{ marginBottom: 12 }}>
-            <label style={labelStyle}>Gates</label>
+            <label style={labelStyle}>Preset gates</label>
             <div
               style={{
                 display: "flex",
@@ -713,7 +947,7 @@ export const App: React.FC = () => {
                 marginBottom: 4,
               }}
             >
-              {(["X", "Y", "Z", "F", "T"] as GateName[]).map((g) => (
+              {presetGates.map((g) => (
                 <button
                   key={g}
                   onClick={() => handleApplyGate(g)}
@@ -729,10 +963,90 @@ export const App: React.FC = () => {
                 </button>
               ))}
             </div>
-            <div style={smallTextStyle}>
+            <div style={{ ...smallTextStyle, marginBottom: 8 }}>
               Each gate is applied to the current state ψ, and W(q,p)
-              updates. The custom amplitudes panel keeps your original
-              specification.
+              updates.
+            </div>
+
+            {/* Custom gate editor */}
+            <div style={{ marginTop: 8 }}>
+              <label style={labelStyle}>Custom unitary U (d × d)</label>
+              <div style={{ ...smallTextStyle, marginBottom: 4 }}>
+                Edit U₍i,j₎ as expressions, e.g.{" "}
+                <code>exp(i*pi/3)/sqrt(2)</code>,{" "}
+                <code>1/sqrt(2)</code>, or <code>1/3 + i*sqrt(3)/2</code>.
+                No unitarity check is enforced; make sure U is unitary if
+                you care.
+              </div>
+              <div
+                style={{
+                  maxHeight: 160,
+                  overflowY: "auto",
+                  border: "1px solid #4b5563",
+                  borderRadius: 4,
+                  padding: 4,
+                }}
+              >
+                {Array.from({ length: d }).map((_, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      display: "flex",
+                      gap: 4,
+                      marginBottom: 4,
+                      alignItems: "center",
+                    }}
+                  >
+                    <span style={{ fontSize: 10 }}>row {i}</span>
+                    {Array.from({ length: d }).map((_, j) => (
+                      <div
+                        key={j}
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 2,
+                        }}
+                      >
+                        {/* Expression field */}
+                        <input
+                          type="text"
+                          value={gateExpr[i]?.[j] ?? ""}
+                          onChange={(e) =>
+                            handleGateExpressionChange(
+                              i,
+                              j,
+                              e.target.value
+                            )
+                          }
+                          placeholder={i === j ? "1" : "0"}
+                          style={{
+                            width: 90,
+                            padding: "1px 3px",
+                            borderRadius: 4,
+                            border: "1px solid #4b5563",
+                            background: "#020617",
+                            color: "#e5e7eb",
+                            fontSize: 10,
+                          }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+              <button
+                onClick={handleApplyCustomGate}
+                disabled={loading}
+                style={{
+                  ...buttonStyle,
+                  marginTop: 8,
+                  background: "#facc15",
+                  color: "#1f2937",
+                  opacity: loading ? 0.6 : 1,
+                }}
+              >
+                {loading ? "Applying..." : "Apply custom unitary"}
+              </button>
             </div>
           </div>
         )}
@@ -753,9 +1067,11 @@ export const App: React.FC = () => {
         <p style={{ ...smallTextStyle, marginTop: 16 }}>
           The Wigner plot always shows the current state ψ. Continuous
           evolution computes a trajectory ψ(tₙ) and lets you move along it
-          in time; gate mode applies unitaries directly to ψ. Custom
-          amplitudes are edited in the panel above without being
-          renormalized in-place.
+          in time; gate mode applies preset unitaries (X, Y, Z, F, T) or a
+          custom unitary U directly to ψ. Expressions like{" "}
+          <code>e^(i*pi/3)</code>, <code>0.5 + i*sqrt(3)/2</code>, or{" "}
+          <code>Exp[I*Pi/3]</code> are supported for both the state and
+          the unitary.
         </p>
       </div>
 

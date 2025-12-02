@@ -1,76 +1,73 @@
-import { API_BASE } from "./config";
-
-export type InitialStateType = "basis" | "equal_superposition" | "custom";
-
 export interface ComplexNumber {
   re: number;
   im: number;
 }
 
+// initial state types used only on the frontend
+export type InitialStateType =
+  | "basis"
+  | "equal_superposition"
+  | "coherent"
+  | "custom";
+
+export type GateName = "X" | "Y" | "Z" | "F" | "T" | "custom";
+
 export interface SimulationRequest {
   d: number;
-  hamiltonian: "diagonal_quadratic";
-  initial_state: InitialStateType;
-  basis_index?: number;
-  t_max?: number;
-  n_steps?: number;
-
-  // only used when initial_state === "custom"
-  psi_custom?: ComplexNumber[];
+  hamiltonian: string;
+  initial_state: "custom"; // we always send custom, using psi_custom
+  basis_index: number;
+  t_max: number;
+  n_steps: number;
+  psi_custom: ComplexNumber[];
 }
 
 export interface SimulationResponse {
   d: number;
-  ts: number[];
-  W: number[][][];          // [n][d][d]
-  psi: ComplexNumber[][];   // [n][d]
+  ts: number[];          // length n_steps
+  W: number[][][];       // [n_steps][d][d]
+  psi: ComplexNumber[][]; // [n_steps][d]
 }
-
-
-export type GateName = "X" | "Y" | "Z" | "F" | "T";
 
 export interface GateRequest {
   d: number;
   gate: GateName;
   psi: ComplexNumber[];
+  U?: ComplexNumber[][]; // only used for gate === "custom"
 }
 
 export interface GateResponse {
   d: number;
-  psi: ComplexNumber[];   // single state
-  W: number[][];          // [d][d]
+  psi: ComplexNumber[]; // new state
+  W: number[][];        // Wigner of new state [d][d]
 }
 
 export async function runSimulation(
-  params: SimulationRequest
+  req: SimulationRequest
 ): Promise<SimulationResponse> {
-  const res = await fetch(`${API_BASE}/simulate`, {
+  const resp = await fetch("http://127.0.0.1:8000/simulate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
+    body: JSON.stringify(req),
   });
-
-  if (!res.ok) {
-    const msg = await res.text();
-    throw new Error(`Simulation failed: ${res.status} ${msg}`);
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error(`Simulation failed: ${resp.status} ${text}`);
   }
-
-  return res.json();
+  return resp.json();
 }
 
 export async function applyGate(
-  params: GateRequest
+  req: GateRequest
 ): Promise<GateResponse> {
-  const res = await fetch(`${API_BASE}/apply_gate`, {
+  const resp = await fetch("http://127.0.0.1:8000/apply_gate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
+    body: JSON.stringify(req),
   });
-
-  if (!res.ok) {
-    const msg = await res.text();
-    throw new Error(`Gate application failed: ${res.status} ${msg}`);
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error(`Gate application failed: ${resp.status} ${text}`);
   }
-
-  return res.json();
+  return resp.json();
 }

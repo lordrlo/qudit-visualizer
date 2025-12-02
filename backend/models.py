@@ -27,13 +27,20 @@ class SimulationResponse(BaseModel):
     W: List[List[List[float]]]     # [n_steps][d][d]
     psi: List[List[ComplexNumber]] # [n_steps][d]
 
+from typing import List, Optional
+from pydantic import BaseModel
+
+class ComplexNumber(BaseModel):
+    re: float
+    im: float
 
 class GateRequest(BaseModel):
     d: int
-    gate: GateName
-    psi: List[ComplexNumber]   # current state amplitudes: length d
+    gate: str                    # "X","Y","Z","F","T","custom"
+    psi: List[ComplexNumber]     # input state
+    U: Optional[List[List[ComplexNumber]]] = None  # only for gate == "custom"
 
 class GateResponse(BaseModel):
     d: int
-    psi: List[ComplexNumber]   # new state after the gate
-    W: List[List[float]]       # Wigner for the new state: shape [d][d]
+    psi: List[ComplexNumber]
+    W: List[List[float]]

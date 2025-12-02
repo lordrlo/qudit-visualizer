@@ -21,14 +21,16 @@ Initial version (this repo) supports:
   - Time evolution under a **fixed diagonal Hamiltonian**
     - Energies: `E_k = k^2 / d` for `k = 0, 1, ..., d-1`
     - Hamiltonian matrix: `H = diag(E_0, ..., E_{d-1})`
-    
+
   - Gates
-    `X,Y,Z,F,T`
+    - Preset: `X,Y,Z,F,T`
+    - Custom gate
 
 - Three initial state presets:
 
   - **Basis state** `|q0>` in the computational basis
   - **Equal superposition** `(1/sqrt(d)) * sum_q |q>`
+  - **Coherent state** `|q,p> = D_{q,p} |0>`
   - **Custom state** specifying amplitudes for each basis element
 
 - **Discrete Wigner function**
