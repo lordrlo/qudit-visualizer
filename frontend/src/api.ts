@@ -1,3 +1,5 @@
+import { API_BASE } from "./config";
+
 export interface ComplexNumber {
   re: number;
   im: number;
@@ -46,7 +48,7 @@ export interface GateResponse {
 export async function runSimulation(
   req: SimulationRequest
 ): Promise<SimulationResponse> {
-  const resp = await fetch("http://127.0.0.1:8000/simulate", {
+  const resp = await fetch(`${API_BASE}/simulate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(req),
@@ -61,7 +63,7 @@ export async function runSimulation(
 export async function applyGate(
   req: GateRequest
 ): Promise<GateResponse> {
-  const resp = await fetch("http://127.0.0.1:8000/apply_gate", {
+  const resp = await fetch(`${API_BASE}/apply_gate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(req),
