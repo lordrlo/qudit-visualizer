@@ -147,14 +147,6 @@ cd qudit_visualizer
 
 ### 2. Backend setup (FastAPI + Dynamiqs)
 
-Create and activate a virtual environment (optional but recommended):
-
-```bash
-cd backend
-python -m venv .venv
-source .venv/bin/activate   # on macOS / Linux
-# .venv\Scripts\activate  # on Windows
-```
 
 Install dependencies:
 
@@ -165,6 +157,7 @@ pip install -r requirements.txt
 Run the backend:
 
 ```bash
+cd backend
 uvicorn app:app --reload --port 8000
 ```
 
