@@ -1,0 +1,33 @@
+:root {
+  /* keep fonts and color scheme if you like */
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui,
+    sans-serif;
+  line-height: 1.5;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  color-scheme: dark;
+}
+
+/* good to keep box-sizing sane everywhere */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* make body + html fill the screen, no margins */
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* THIS is the key part: root should fill the viewport, no max-width */
+#root {
+  width: 100vw;
+  height: 100vh;
+  margin: 0;
+  padding: 0;
+}
