@@ -15,21 +15,15 @@ from backend.wigner import phase_point_ops, wigner_from_rho
 
 app = FastAPI(title="Discrete Wigner Simulator")
 
-# CORS: allow local dev + GitHub Pages frontend
-origins = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "https://lordrlo.github.io",
-    "https://lordrlo.github.io/qudit-visualizer/",
-]
-
+# --- CORS: allow all origins (so any frontend can use this API) ---
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=False,  # we don't need cookies/auth
+    allow_origins=["*"],        # allow every origin
+    allow_credentials=False,    # must be False when using "*"
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 def build_hamiltonian(d: int, kind: str):
     if kind == "diagonal_quadratic":
@@ -38,6 +32,7 @@ def build_hamiltonian(d: int, kind: str):
         return H, energies
     else:
         raise ValueError(f"Unknown Hamiltonian type: {kind}")
+
 
 def build_initial_state(
     d: int,
@@ -117,7 +112,7 @@ def apply_gate_to_psi(psi: jnp.ndarray, gate: str, d: int) -> jnp.ndarray:
 def simulate(req: SimulationRequest):
     d = req.d
 
-    # Build H
+    # --- Build H ---
     if req.hamiltonian == "custom":
         if req.H_custom is None:
             raise HTTPException(
@@ -137,16 +132,13 @@ def simulate(req: SimulationRequest):
             ],
             dtype=jnp.complex64,
         )
-
-        # Optionally enforce Hermiticity softly:
+        # softly enforce Hermiticity
         H = 0.5 * (H + jnp.conjugate(H.T))
-
     else:
         H, _energies = build_hamiltonian(d, req.hamiltonian)
-        # ensure complex dtype
         H = jnp.array(H, dtype=jnp.complex64)
 
-    # Build initial state
+    # --- Build initial state ---
     try:
         psi0 = build_initial_state(
             d,
@@ -160,19 +152,46 @@ def simulate(req: SimulationRequest):
     # Time grid
     tsave = jnp.linspace(0.0, req.t_max, req.n_steps)
 
-    # Solve Schrodinger equation
+    # Solve Schrödinger equation
     result = dq.sesolve(H, psi0, tsave)
-    states = result.states  # shape (n_steps, d, 1)
 
+    # result.states may be:
+    # - a QArray (new dynamiqs) -> need dq.to_jax
+    # - already an array-like (old dynamiqs)
+    states_raw = result.states
+
+    if hasattr(dq, "to_jax"):
+        try:
+            states = dq.to_jax(states_raw)
+        except TypeError:
+            # if states_raw is already an ndarray in some versions
+            states = jnp.array(states_raw)
+    else:
+        states = jnp.array(states_raw)
+
+    # states is now a jnp.ndarray, either shape (n_steps, d, 1) or (n_steps, d)
     psi_list = []
     W_list = []
 
     A = phase_point_ops(d)
 
-    for n in range(req.n_steps):
-        psi_t = states[n, :, 0]               # (d,)
+    n_steps_eff = states.shape[0]
+
+    for n in range(n_steps_eff):
+        if states.ndim == 3:
+            # (n_steps, d, 1)
+            psi_t = states[n, :, 0]
+        elif states.ndim == 2:
+            # (n_steps, d)
+            psi_t = states[n, :]
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Unexpected states array shape: {states.shape}",
+            )
+
         rho_t = jnp.outer(psi_t, jnp.conj(psi_t))
-        W = wigner_from_rho(rho_t, A)        # (d,d)
+        W = wigner_from_rho(rho_t, A)
         W_list.append(W.tolist())
 
         psi_list.append([
@@ -222,7 +241,6 @@ def apply_gate(req: GateRequest):
                 detail="Custom gate U must be a d×d matrix.",
             )
 
-        # build JAX complex matrix from U
         U = jnp.array(
             [
                 [u.re + 1j * u.im for u in row]
@@ -251,8 +269,7 @@ def apply_gate(req: GateRequest):
     rho = psi_new @ jnp.conjugate(psi_new.T)
     W = wigner_from_rho(rho, A)  # shape (d, d)
 
-    # convert psi_new back to list[ComplexNumber]
-    psi_list: list[dict] = []
+    psi_list = []
     psi_flat = psi_new[:, 0]
     for z in psi_flat:
         psi_list.append(
