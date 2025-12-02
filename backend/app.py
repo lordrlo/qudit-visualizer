@@ -15,11 +15,18 @@ from backend.wigner import phase_point_ops, wigner_from_rho
 
 app = FastAPI(title="Discrete Wigner Simulator")
 
-# Allow your frontend domain; for dev just use "*"
+# CORS: allow local dev + GitHub Pages frontend
+origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "https://lordrlo.github.io",
+    "https://lordrlo.github.io/qudit-visualizer/",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # restrict in prod if you like
-    allow_credentials=True,
+    allow_origins=origins,
+    allow_credentials=False,  # we don't need cookies/auth
     allow_methods=["*"],
     allow_headers=["*"],
 )
