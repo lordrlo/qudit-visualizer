@@ -377,6 +377,8 @@ export const App: React.FC = () => {
   // ---- Dimension change ----
 
   function handleDimensionChange(nd: number) {
+    if (nd < 2) return;
+
     let newRe: number[] = [];
     let newIm: number[] = [];
     let newExpr: string[] = [];
@@ -775,12 +777,17 @@ export const App: React.FC = () => {
 
         {/* Dimension */}
         <div style={{ marginBottom: 12 }}>
-          <label style={labelStyle}>Dimension d (odd)</label>
-          <select
+          <label style={labelStyle}>Dimension d</label>
+          <input
+            type="number"
+            min={2}
             value={d}
-            onChange={(e) =>
-              handleDimensionChange(parseInt(e.target.value, 10))
-            }
+            onChange={(e) => {
+              const val = parseInt(e.target.value, 10);
+              if (Number.isNaN(val)) return;
+              if (val < 2) return;
+              handleDimensionChange(val);
+            }}
             style={{
               width: "100%",
               padding: "4px 6px",
@@ -789,13 +796,11 @@ export const App: React.FC = () => {
               background: "#020617",
               color: "#e5e7eb",
             }}
-          >
-            {[3, 5, 7].map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </select>
+          />
+          <div style={{ ...smallTextStyle, marginTop: 2 }}>
+            Choose any integer d ≥ 2 (odd or even). Larger d makes the
+            simulation and Wigner computation heavier.
+          </div>
         </div>
 
         {/* Initial/current state controls */}

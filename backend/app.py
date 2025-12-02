@@ -109,8 +109,6 @@ def apply_gate_to_psi(psi: jnp.ndarray, gate: str, d: int) -> jnp.ndarray:
 @app.post("/simulate", response_model=SimulationResponse)
 def simulate(req: SimulationRequest):
     d = req.d
-    if d % 2 == 0:
-        raise HTTPException(status_code=400, detail="Only odd d supported currently.")
 
     # Build H
     if req.hamiltonian == "custom":
@@ -189,9 +187,7 @@ def simulate(req: SimulationRequest):
 @app.post("/apply_gate", response_model=GateResponse)
 def apply_gate(req: GateRequest):
     d = req.d
-    if d % 2 == 0:
-        raise HTTPException(status_code=400, detail="Only odd d supported currently.")
-
+    
     if len(req.psi) != d:
         raise HTTPException(status_code=400, detail="psi must have length d.")
 
