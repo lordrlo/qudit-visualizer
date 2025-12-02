@@ -4,7 +4,13 @@ from fastapi.middleware.cors import CORSMiddleware
 import dynamiqs as dq
 import jax.numpy as jnp
 
-from models import SimulationRequest, SimulationResponse
+from models import (
+    SimulationRequest,
+    SimulationResponse,
+    GateRequest,
+    GateResponse,
+    ComplexNumber,
+)
 from wigner import phase_point_ops, wigner_from_rho
 
 app = FastAPI(title="Discrete Wigner Simulator")
@@ -61,6 +67,45 @@ def build_initial_state(
         raise ValueError(f"Unknown initial state type: {initial_type}")
 
 
+
+def apply_gate_to_psi(psi: jnp.ndarray, gate: str, d: int) -> jnp.ndarray:
+    """
+    psi: column vector shape (d, 1)
+    gate: "X", "Y", "Z", "F", "T"
+    returns U_gate psi, same shape
+    """
+    omega = jnp.exp(2j * jnp.pi / d)
+    idx = jnp.arange(d)
+
+    if gate == "X":
+        # cyclic shift: |q> -> |q+1>
+        return jnp.roll(psi, shift=1, axis=0)
+
+    elif gate == "Z":
+        phases = omega ** idx  # shape (d,)
+        return phases.reshape(d, 1) * psi
+
+    elif gate == "Y":
+        # define Y = Z X
+        psi_x = jnp.roll(psi, shift=1, axis=0)
+        phases = omega ** idx
+        return phases.reshape(d, 1) * psi_x
+
+    elif gate == "F":
+        # discrete Fourier: F[p, q] = omega^(p q) / sqrt(d)
+        p = idx.reshape(d, 1)
+        q = idx.reshape(1, d)
+        F = omega ** (p * q) / jnp.sqrt(d)
+        return F @ psi
+
+    elif gate == "T":
+        # simple quadratic phase
+        phases = jnp.exp(1j * jnp.pi * (idx ** 2) / d)
+        return phases.reshape(d, 1) * psi
+
+    else:
+        raise ValueError(f"Unknown gate: {gate}")
+    
 @app.post("/simulate", response_model=SimulationResponse)
 def simulate(req: SimulationRequest):
     d = req.d
@@ -87,19 +132,74 @@ def simulate(req: SimulationRequest):
     result = dq.sesolve(H, psi0, tsave)
     states = result.states  # shape (n_steps, d, 1)
 
-    # Phase-point operators
+    psi_list = []
+    W_list = []
+
     A = phase_point_ops(d)
 
-    W_list = []
     for n in range(req.n_steps):
-        psi_t = states[n, :, 0]  # (d,)
-        rho_t = jnp.outer(psi_t, jnp.conj(psi_t))  # (d,d)
-        W = wigner_from_rho(rho_t, A)             # (d,d)
+        psi_t = states[n, :, 0]               # (d,)
+        rho_t = jnp.outer(psi_t, jnp.conj(psi_t))
+        W = wigner_from_rho(rho_t, A)        # (d,d)
         W_list.append(W.tolist())
 
-    response = SimulationResponse(
+        psi_list.append([
+            ComplexNumber(
+                re=float(jnp.real(z)),
+                im=float(jnp.imag(z))
+            )
+            for z in psi_t
+        ])
+
+    return SimulationResponse(
         d=d,
         ts=[float(t) for t in tsave],
         W=W_list,
+        psi=psi_list,
     )
-    return response
+
+@app.post("/apply_gate", response_model=GateResponse)
+def apply_gate(req: GateRequest):
+    d = req.d
+    if d % 2 == 0:
+        raise HTTPException(status_code=400, detail="Only odd d supported currently.")
+
+    if len(req.psi) != d:
+        raise HTTPException(status_code=400, detail="psi must have length d.")
+
+    # build column vector from list of complex numbers
+    psi = jnp.array(
+        [c.re + 1j * c.im for c in req.psi],
+        dtype=jnp.complex64,
+    ).reshape(d, 1)
+
+    # normalize to avoid drift
+    norm = jnp.linalg.norm(psi)
+    if norm == 0:
+        raise HTTPException(status_code=400, detail="Input state has zero norm.")
+    psi = psi / norm
+
+    # apply gate
+    try:
+        psi_new = apply_gate_to_psi(psi, req.gate, d)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # compute Wigner for the new state
+    A = phase_point_ops(d)
+    rho = psi_new @ jnp.conjugate(psi_new.T)
+    W = wigner_from_rho(rho, A)  # shape (d, d)
+
+    # convert psi_new back to list[ComplexNumber]
+    psi_list: list[ComplexNumber] = []
+    psi_flat = psi_new[:, 0]
+    for z in psi_flat:
+        psi_list.append(
+            ComplexNumber(re=float(jnp.real(z)), im=float(jnp.imag(z)))
+        )
+
+    return GateResponse(
+        d=d,
+        psi=psi_list,
+        W=W.tolist(),
+    )

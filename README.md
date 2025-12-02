@@ -16,10 +16,14 @@ This is meant as both an educational tool and a portfolio project showcasing num
 Initial version (this repo) supports:
 
 - Single **qudit** of dimension `d` (currently **odd** `d`: 3, 5, 7, …).
-- Time evolution under a **fixed diagonal Hamiltonian**
+- Two different **evolution modes**
 
-  - Energies: `E_k = k^2 / d` for `k = 0, 1, ..., d-1`
-  - Hamiltonian matrix: `H = diag(E_0, ..., E_{d-1})`
+  - Time evolution under a **fixed diagonal Hamiltonian**
+    - Energies: `E_k = k^2 / d` for `k = 0, 1, ..., d-1`
+    - Hamiltonian matrix: `H = diag(E_0, ..., E_{d-1})`
+    
+  - Gates
+    `X,Y,Z,F,T`
 
 - Three initial state presets:
 
