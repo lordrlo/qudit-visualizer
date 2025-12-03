@@ -1,3 +1,5 @@
+# qudit_visualizer/__main__.py
+
 import threading
 import time
 import urllib.request
@@ -25,7 +27,7 @@ def open_browser_when_ready(url: str) -> None:
 
 
 def main() -> None:
-    host = "0.0.0.0"   # listen on all interfaces (like before)
+    host = "0.0.0.0"   # listen on all interfaces
     port = 8000
 
     # For the browser we usually want localhost
