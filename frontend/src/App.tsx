@@ -963,7 +963,7 @@ export const App: React.FC = () => {
                           setHamiltonianType("diagonal_quadratic")
                         }
                       >
-                        H = q²/d
+                        H<sub>ij</sub> = i²/d  δ<sub>ij</sub>
                       </button>
                       <button
                         className={

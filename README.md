@@ -1,248 +1,321 @@
-# Discrete Wigner Visualizer
+# Qudit Visualizer – Discrete Wigner Function
 
-Interactive visualizer for the **discrete Wigner function** of a single qudit (finite-dimensional quantum system) evolving under a fixed Hamiltonian.
+This project visualizes the discrete Wigner function of a single qudit of arbitrary dimension $d \ge 2$.  
+It supports both odd and even local dimensions and provides an interactive way to explore states and dynamics directly in discrete phase space.
 
-The project is split into:
+## Online demo
 
-- a **Python backend** (FastAPI + [Dynamiqs](https://github.com/dynamiqs/dynamiqs)) that solves the Schrödinger equation for a qudit,
-- a **React + TypeScript frontend** that displays the discrete Wigner function `W(q, p; t)` as an animated heatmap.
+A live demo of the frontend is available here:
 
-This is meant as both an educational tool and a portfolio project showcasing numerical quantum dynamics and modern web dev.
+👉 **https://lordrlo.github.io/qudit-visualizer/**
+
+> **Performance note:** the online demo talks to a small remote backend and can be very slow for larger $d$ or long evolutions. For serious use (or just a smooth experience), you should run both backend and frontend locally, as described in the installation section.
+
+You can:
+
+- Define arbitrary initial states
+- Evolve them either by discrete gates or continuous time evolution under arbitrary Hamiltonians
+- Inspect the resulting Wigner function $W(q,p,t)$
 
 ---
 
 ## Features
 
-Initial version (this repo) supports:
+### Qudit and Wigner function
 
-- Single **qudit** of dimension `d` (currently **odd** `d`: 3, 5, 7, …).
+- Single qudit with dimension $d \ge 2$ (odd or even).
+- Discrete phase space with coordinates $(q,p)$ in $\mathbb{Z}_d \times \mathbb{Z}_d$.
+- Wigner function computed as 
 
-- Time evolution under an **arbirary Hamiltonian** or **arbitrary gate**, optionally choosing between presets.
+  $$W(q,p) = \frac{1}{d}\mathrm{Tr}\big[\rho A_{q,p}\big]$$
 
-- Three initial state presets:
+  where $\rho = \ket{\psi}\bra{\psi}$ and $A_{q,p}$ are phase–point operators (see the theory section for details).
 
-  - **Basis state** `|q0>` in the computational basis
-  - **Equal superposition** `(1/sqrt(d)) * sum_q |q>`
-  - **Coherent state** `|q,p> = D_{q,p} |0>`
-  - **Custom state** specifying amplitudes for each basis element
+### Initial states
 
-- **Discrete Wigner function**
+Initial states are configured on the frontend and sent to the backend as a normalized vector $\lvert\psi\rangle$. Supported presets:
 
-  - `W(q, p; t) = (1/d) * Tr[ rho(t) * A_{q,p} ]`
-  - where `rho(t) = |psi(t)><psi(t)|` and `A_{q,p}` are phase-point operators (see Theory below).
+- **Computational basis state** $\lvert i\rangle$  
+  with a slider for the index $i$.
+- **Equal superposition**
 
-- Animated **heatmap** of `W(q, p; t)`:
+  $$\lvert\psi\rangle = \frac{1}{\sqrt{d}} \sum_{k=0}^{d-1} \lvert k\rangle$$
 
-  - Red = positive quasi-probability
-  - Blue = negative quasi-probability
-  - Intensity = magnitude `|W(q, p; t)|`
+- **“Coherent”-like state** $\lvert q,p\rangle$  
+  constructed via a discrete displacement $D_{q,p}\lvert 0\rangle$, with tunable $(q,p)$.
+- **Custom state**  
+  - Specify amplitudes $\psi_i$ as mathjs expressions, e.g.
+    `exp(i*pi/3)/sqrt(2)`, `cos(2*pi) + 3*i`.  
+  - The backend normalizes the state when you press **Generate**.
 
-- Interactive controls:
+### Evolution modes
 
-  - Dimension `d` (odd)
-  - Initial state choice (`|q>` or equal superposition)
-  - Time slider
-  - Play / pause and speed control
-  - **Hover** over a cell to see `(q, p, W(q, p))` numerically in real time.
+Two complementary evolution modes are available.
 
----
+#### 1. Gate mode
 
-## Tech stack
+Apply a single unitary gate to the current state:
 
-**Backend**
+- **Built-in gates**:
+  - **$X$** – cyclic shift in the computational basis,
+  - **$Z$** – phase gate $Z\lvert q\rangle = \omega^q \lvert q\rangle$,
+  - **$F$** – discrete Fourier transform,
+  - **$T$** – simple quadratic phase gate.
+- **Custom gate**:
+  - Choose any $d \times d$ unitary matrix that will be used as a gate.
 
-- Python 3
-- [Dynamiqs](https://github.com/dynamiqs/dynamiqs) (JAX-based quantum dynamics)
-- FastAPI
-- Uvicorn
+After applying the gate, the backend:
 
-**Frontend**
+1. Normalizes the resulting state,
+2. Computes the new Wigner function $W(q,p)$,
+3. Returns the updated state and Wigner function.
 
-- React + TypeScript
-- Vite
-- Plain CSS / inline styles for layout
-- HTML canvas for the heatmap
+#### 2. Continuous evolution mode
 
----
+Solve the time-dependent Schrödinger equation
 
-## Theory overview (informal)
+$$
+i \frac{d}{dt}\lvert\psi(t)\rangle = H \lvert\psi(t)\rangle
+$$
 
-We consider a single qudit of dimension `d` with computational basis `{ |q> }` for `q = 0, ..., d-1`.
+using Dynamiqs on top of JAX.
 
-### Hamiltonian
+- Time parameters:
+  - Final time $t_{\max}$,
+- Hamiltonian choices:
+  - **Preset**: diagonal quadratic spectrum $H_{i,i} = i^2 / d$,
+  - **Custom**: full $d \times d$ hermitian matrix specified in the UI.
 
-In this initial version the Hamiltonian is fixed to a diagonal “discrete oscillator” style spectrum:
+For each saved time point, the backend:
 
-- `E_k = k^2 / d`
-- `H = diag(E_0, ..., E_{d-1})`
+1. Extracts $\lvert\psi(t_n)\rangle$,
+2. Builds $\rho(t_n) = \lvert\psi(t_n)\rangle\langle\psi(t_n)\rvert$,
+3. Computes $W(q,p;t_n)$,
+4. Returns the time series $\{t_n\}$, states, and Wigner functions.
 
-The time-dependent state is
+### Visualization & controls
 
-- `|psi(t)> = exp(-i H t) |psi(0)>`
-- `rho(t) = |psi(t)><psi(t)|`
-
-### Discrete Wigner function (odd d)
-
-For **odd** `d`, we define phase–point operators
-
-- `A_{q,p} = sum_s omega^(2 p s) |q + s><q - s|`
-- with `omega = exp(2 pi i / d)` and all indices understood modulo `d`.
-
-These operators satisfy:
-
-- `Tr(A_{q,p}) = 1`
-- `Tr(A_{q,p} A_{q',p'}) = d * delta_{q,q'} * delta_{p,p'}`
-
-The **discrete Wigner function** is defined as
-
-- `W(q, p; t) = (1/d) * Tr[ rho(t) * A_{q,p} ]`
-
-Properties:
-
-- `W(q, p; t)` is **real-valued**.
-- It is **normalized**: sum over all `q, p` gives 1.
-- It can be negative: it is a **quasi-probability distribution**, not a true probability distribution.
-
-The visualization shows `W(q, p; t)` on a `d x d` grid as a diverging colormap:
-
-- **red** = positive values,
-- **blue** = negative values,
-- **white** ≈ zero.
+- Wigner function displayed as a heatmap on a canvas:
+  - **blue** for negative values,
+  - **white** near zero,
+  - **red** for positive values.
+- Hover tooltips show $W(q,p)$ at the cursor.
+- For continuous evolution:
+  - Playback controls (play/pause),
+  - Frame slider,
+  - Speed control.
 
 ---
 
 ## Project structure
 
+Repository layout (top level):
+
 ```text
-qudit_visualizer/
-  backend/
-    app.py          # FastAPI app + Dynamiqs solver
-    models.py       # Pydantic request/response models
-    wigner.py       # phase-point operators + Wigner computation
-    requirements.txt
-  frontend/
-    index.html
-    package.json
-    vite.config.ts
-    src/
-      main.tsx
-      App.tsx
-      api.ts        # calls the /simulate endpoint
-      config.ts     # API_BASE configuration
-      index.css
-      components/
-        WignerHeatmap.tsx
+.
+├── backend/
+│   ├── app.py          # FastAPI app: endpoints, dynamics, Wigner computation
+│   ├── models.py       # Pydantic models for requests/responses
+│   └── wigner.py       # Phase–point operators A(q,p) and Wigner map
+├── frontend/
+│   ├── .env.development    # VITE_API_BASE for local dev
+│   ├── .env.production     # VITE_API_BASE for deployed demo
+│   ├── index.html
+│   ├── vite.config.ts
+│   └── src/
+│       ├── App.tsx             # Main React app: UI, controls, state management
+│       ├── api.ts              # Typed API client for /simulate, /apply_gate
+│       ├── config.ts           # API_BASE configuration
+│       ├── components/
+│       │   └── WignerHeatmap.tsx  # Canvas-based Wigner heatmap component
+│       ├── App.css, index.css  # Styling
+│       └── main.tsx            # React entry point
+├── benchmark.py        # Local benchmark script for backend performance
+├── requirements.txt    # Python backend dependencies
+└── README.md           # (This file)
 ```
 
 ---
 
-## Getting started
+## Tech stack
 
-### 1. Clone the repo
+### Backend
+
+- Python 3
+- FastAPI – HTTP API server
+- [Dynamiqs](https://github.com/dynamiqs/dynamiqs) – solvers for Schrödinger dynamics on top of JAX
+- JAX / jax.numpy – linear algebra and fast array operations
+- uvicorn – ASGI server for development and deployment
+
+Main HTTP endpoints (see `backend/app.py`):
+
+- `POST /simulate`  
+  Runs continuous time evolution with chosen Hamiltonian and initial state.
+- `POST /apply_gate`  
+  Applies a single unitary gate and returns the updated state and Wigner function.
+- `GET /health`  
+  Lightweight health check.
+
+### Frontend
+
+- React + TypeScript
+- Vite – dev server and bundler
+- mathjs – parsing and evaluating complex-valued expressions in the UI
+- Plain CSS for layout and styling; plotting uses a simple HTML `<canvas>`
+
+---
+
+## Theory overview
+
+1. **Generalized Pauli operators**  
+   For a $d$-dimensional Hilbert space with computational basis $\{\lvert q\rangle : q \in \mathbb{Z}_d\}$, define
+
+   - $X\lvert q\rangle = \lvert q + 1 \bmod d\rangle$,
+   - $Z\lvert q\rangle = \omega^q \lvert q\rangle$, with $\omega = e^{2\pi i / d}$.
+
+   These generate the discrete Weyl–Heisenberg group and underpin the phase–space structure.
+
+2. **Phase space and phase–point operators**  
+   The discrete phase space is
+
+   $$\Gamma_d = \{(q,p)\}= \mathbb{Z}_d \times \mathbb{Z}_d.$$
+
+   To each phase–space point $(q,p)$ we associate a Hermitian phase–point operator $A_{q,p}$.  
+   The Wigner function is then
+
+   $$W(q,p) = \frac{1}{d}\mathrm{Tr}\big[\rho A_{q,p}\big]$$
+
+   and satisfies:
+
+   - Real-valuedness,
+   - Normalization $\sum_{q,p} W(q,p) = 1$,
+   - Correct marginals (line sums reproduce measurement probabilities),
+   - Possible negativity for nonclassical states.
+
+3. **Odd vs even dimension and the citation**  
+
+   - For odd $d$ there is a simple closed-form expression for $A_{q,p}$ in terms of shifts in the computational basis, which is implemented directly in the code (see the `phase_point_ops_odd` path in `backend/wigner.py`). One convenient expression is
+
+     $$A_{q,p} = \sum_{s=0}^{d-1} \omega^{2ps} \lvert q + s\rangle\langle q - s\rvert$$
+
+     with indices understood modulo $d$.
+
+   - For even $d$, constructing a Wigner function on a $d \times d$ lattice with good axiomatic properties is subtler. The implementation in this repository follows the stencil-based framework of:
+
+     > Lucky K. Antonopoulos, Joseph F. Fitzsimons, Adam G. M. Lewis, and Antoine Tilloy,  
+     > “Grand Unification of All Discrete Wigner Functions on $d \times d$ Phase Space”,  
+     > PRA 112, 052219 (2025), https://doi.org/10.1103/s5wn-mysr
+
+     In short:
+
+     1. Build a “parent” Wigner kernel on a $2d \times 2d$ phase space using Weyl operators $X^m Z^n$ and a parity operator $P$.
+     2. Construct parent phase–point operators $A^{(2d)}(m_1,m_2)$ on that larger lattice.
+     3. Compress the result to a $d \times d$ phase space by averaging over a $2 \times 2$ stencil:
+
+        $$A(q,p) = \frac{1}{2} \sum_{b_1,b_2 \in \{0,1\}}A^{(2d)}(2q + b_1, 2p + b_2).$$
+
+     This guarantees a consistent Wigner function on the $d \times d$ lattice for even $d$.
+
+4. **Dynamics**  
+
+   - Gate mode: $\lvert\psi'\rangle = U \lvert\psi\rangle$ for a chosen or custom unitary $U$.
+   - Continuous mode: integrate $i\, d\lvert\psi\rangle/dt = H\lvert\psi\rangle$ with Dynamiqs, sample
+     $\lvert\psi(t_n)\rangle$, and compute $W(q,p;t_n)$ at each time.
+
+---
+
+## Installation and local use
+
+> Recommended: For good performance, run the project locally instead of using the online demo.
+
+### 1. Clone the repository
 
 ```bash
-git clone https://github.com/lordrlo/qudit_visualizer.git
-cd qudit_visualizer
+git clone https://github.com/lordrlo/qudit-visualizer.git
+cd qudit-visualizer/
 ```
+
+---
 
 ### 2. Backend setup (FastAPI + Dynamiqs)
 
-
-Install dependencies:
+Create a virtual environment and install dependencies:
 
 ```bash
+python -m venv .venv
+source .venv/bin/activate       
+pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-Run the backend:
+Run the backend with uvicorn:
 
 ```bash
-cd backend
-uvicorn app:app --reload --port 8000
+uvicorn backend.app:app --reload
 ```
 
-This starts a FastAPI server at `http://localhost:8000`.
+By default this starts the API at `http://localhost:8000`.
+
+> If you want GPU acceleration, install a JAX/JAXLIB build compatible with your CUDA/ROCm stack before installing `dynamiqs`. The project itself does not require a GPU and works on CPU-only installs (just slower).
+
+---
 
 ### 3. Frontend setup (React + Vite)
 
-In another terminal:
+In a separate terminal, leaving the backend running:
 
 ```bash
-cd qudit_visualizer/frontend
-npm install
-```
-
-If needed, configure the backend URL (defaults to `http://localhost:8000`):
-
-```bash
-# frontend/.env.local  (optional)
-VITE_API_BASE=http://localhost:8000
-```
-
-Run the dev server:
-
-```bash
+cd frontend
+npm install          # or pnpm/yarn if you prefer
 npm run dev
 ```
 
-Open the URL printed by Vite (usually `http://localhost:5173`).
+This starts the Vite dev server at something like `http://localhost:5173`.
+
+The file `frontend/.env.development` already sets
+
+```bash
+VITE_API_BASE=http://localhost:8000
+```
+
+so the frontend will automatically talk to your local backend.
+
+Open the printed URL (usually `http://localhost:5173/`) in your browser.
 
 ---
 
-## How to use
+### 4. Optional: production build
 
-1. Start the backend:
+To build a static bundle of the frontend:
 
-   ```bash
-   cd backend
-   uvicorn app:app --reload --port 8000
-   ```
+```bash
+cd frontend
+npm run build
+npm run preview   # serves the built bundle locally
+```
 
-2. Start the frontend:
-
-   ```bash
-   cd frontend
-   npm run dev
-   ```
-
-3. Open the frontend in your browser.
-
-4. In the left sidebar:
-
-   - Choose the **dimension** `d` (3, 5, 7, …).
-   - Select the **initial state**:
-     - *Basis state*: use the slider to pick `|q0>`.
-     - *Equal superposition*: the uniform superposition of all basis states.
-
-5. Click **Run simulation**. The frontend sends a request to the backend, which:
-
-   - solves the Schrödinger equation with Dynamiqs,
-   - computes `W(q, p; t_n)` for each time step `t_n`,
-   - returns the data as JSON.
-
-6. Use:
-
-   - the **time slider** to move through the evolution,
-   - the **Play** button and **Speed** slider for continuous animation,
-   - **hover** over any square to see `(q, p, W(q, p))` numerically.
+You can also deploy the contents of `frontend/dist/` to any static hosting service and set `VITE_API_BASE` to the URL of your backend (for example, on a VPS).
 
 ---
 
-## Limitations / future directions
+### 5. Optional: backend benchmark
 
-Current version:
+To get a quick feeling for backend-only performance:
 
-- Single qudit only.
-- Dimension `d` must be **odd** (the phase–point operator construction assumes odd `d`).
-- Hamiltonian is **fixed diagonal** with quadratic spectrum.
-- Pure-state unitary evolution only (no open systems / noise).
+```bash
+python benchmark.py --runs 5 --d 10 --steps 200 --tmax 10.0
+```
 
-Possible extensions:
+This runs a few local simulations (without HTTP) and prints timing statistics for both `simulate` and `apply_gate`.
 
-- Custom initial states (user-specified complex amplitudes in the computational basis).
-- Custom Hamiltonians (diagonal or fully general Hermitian matrices).
-- Support for open-system dynamics via Dynamiqs `mesolve` (collapse operators).
-- Alternative Wigner constructions for even `d` (e.g. qubits and qubit registers).
-- Additional visualizations: probability distributions `|psi_q|^2`, marginals, Wigner negativity.
+---
 
+## Roadmap and ideas
 
+Some natural extensions that this codebase is ready for:
+
+- Multi-qudit phase spaces and Wigner functions,
+- Open-system dynamics (Lindblad) with Dynamiqs,
+- Saving/loading parameter presets and simulation results.
+
+Contributions, bug reports, and feature requests are welcome!
