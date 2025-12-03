@@ -3,6 +3,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import dynamiqs as dq
 import jax.numpy as jnp
+import jax
+from functools import lru_cache
 
 from backend.models import (
     SimulationRequest,
@@ -11,25 +13,54 @@ from backend.models import (
     GateResponse,
     ComplexNumber,
 )
-from backend.wigner import phase_point_ops, wigner_from_rho
+from backend.wigner import phase_point_ops
 
 app = FastAPI(title="Discrete Wigner Simulator")
 
-# --- CORS: allow all origins (so any frontend can use this API) ---
+# CORS: allow local dev + GitHub Pages frontend
+origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "https://lordrlo.github.io",
+    "https://lordrlo.github.io/qudit-visualizer/",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],        # allow every origin
-    allow_credentials=False,    # must be False when using "*"
+    allow_origins=origins,
+    allow_credentials=False,  # we don't need cookies/auth
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
+@lru_cache(maxsize=16)
+def get_phase_point_ops(d: int):
+    """Cached phase-point operators A(q,p) for given dimension d."""
+    print(f"[backend] building phase-point operators for d={d}")
+    return phase_point_ops(d)
+
+
+@lru_cache(maxsize=16)
+def _build_diagonal_quadratic(d: int):
+    """Cached diagonal quadratic Hamiltonian and its eigenvalues."""
+    energies = jnp.array([(k * k) / d for k in range(d)], dtype=float)
+    H = jnp.diag(energies)
+    return H, energies
+
+
+@jax.jit
+def wigner_from_psi_jit(psi, A):
+    """Compute Wigner function from state vector |psi> and phase-point ops A."""
+    rho = jnp.outer(psi, jnp.conj(psi))
+    d = psi.shape[0]
+    W = jnp.einsum("ij,qpji->qp", rho, A) / d
+    return jnp.real(W)
+
+
 def build_hamiltonian(d: int, kind: str):
     if kind == "diagonal_quadratic":
-        energies = jnp.array([(k * k) / d for k in range(d)], dtype=float)
-        H = jnp.diag(energies)
-        return H, energies
+        return _build_diagonal_quadratic(d)
     else:
         raise ValueError(f"Unknown Hamiltonian type: {kind}")
 
@@ -83,7 +114,8 @@ def apply_gate_to_psi(psi: jnp.ndarray, gate: str, d: int) -> jnp.ndarray:
         return jnp.roll(psi, shift=1, axis=0)
 
     elif gate == "Z":
-        phases = omega ** idx  # shape (d,)
+        # phase: |q> -> ω^q |q>
+        phases = omega ** idx
         return phases.reshape(d, 1) * psi
 
     elif gate == "Y":
@@ -173,7 +205,7 @@ def simulate(req: SimulationRequest):
     psi_list = []
     W_list = []
 
-    A = phase_point_ops(d)
+    A = get_phase_point_ops(d)
 
     n_steps_eff = states.shape[0]
 
@@ -190,8 +222,7 @@ def simulate(req: SimulationRequest):
                 detail=f"Unexpected states array shape: {states.shape}",
             )
 
-        rho_t = jnp.outer(psi_t, jnp.conj(psi_t))
-        W = wigner_from_rho(rho_t, A)
+        W = wigner_from_psi_jit(psi_t, A)
         W_list.append(W.tolist())
 
         psi_list.append([
@@ -265,12 +296,11 @@ def apply_gate(req: GateRequest):
     psi_new = psi_new / norm_new
 
     # compute Wigner for the new state
-    A = phase_point_ops(d)
-    rho = psi_new @ jnp.conjugate(psi_new.T)
-    W = wigner_from_rho(rho, A)  # shape (d, d)
+    A = get_phase_point_ops(d)
+    psi_flat = psi_new[:, 0]
+    W = wigner_from_psi_jit(psi_flat, A)  # shape (d, d)
 
     psi_list = []
-    psi_flat = psi_new[:, 0]
     for z in psi_flat:
         psi_list.append(
             {
@@ -284,3 +314,26 @@ def apply_gate(req: GateRequest):
         psi=psi_list,
         W=W.tolist(),
     )
+
+
+@app.on_event("startup")
+def warmup() -> None:
+    """Warm up JAX/dynamiqs and Wigner cache so the first real request is faster."""
+    try:
+        print("[startup] running warmup simulation...")
+        d = 3
+        dummy_req = SimulationRequest(
+            d=d,
+            hamiltonian="diagonal_quadratic",
+            initial_state="basis",
+            basis_index=0,
+            t_max=1.0,
+            n_steps=10,
+            psi_custom=[ComplexNumber(re=0.0, im=0.0) for _ in range(d)],
+            H_custom=None,
+        )
+        _ = simulate(dummy_req)
+        print("[startup] warmup finished.")
+    except Exception as e:
+        # Warmup failures should not crash the app; just log them.
+        print(f"[startup] warmup failed: {e!r}")
