@@ -33,6 +33,15 @@ def main() -> None:
     # For the browser we usually want localhost
     url = f"http://127.0.0.1:{port}/"
 
+    # User feedback before the heavy imports happen
+    print("Qudit-visualizer")
+    print(f"Starting server on {url} ...")
+    print(
+        "Note: the first launch can take a while while Python / JAX / Dynamiqs warm up; "
+        "subsequent runs are much faster.",
+        flush=True,
+    )
+
     # Start a helper thread that waits until "/" responds, then opens browser
     threading.Thread(
         target=open_browser_when_ready,
