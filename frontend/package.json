@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build:gh": "tsc -b && vite build",
+    "build:local": "tsc -b && vite build --mode localapp",
     "lint": "eslint .",
     "preview": "vite preview",
     "deploy": "gh-pages -d dist"

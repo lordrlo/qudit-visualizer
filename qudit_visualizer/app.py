@@ -1,19 +1,22 @@
 # backend/app.py
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from pathlib import Path
 import dynamiqs as dq
 import jax.numpy as jnp
 import jax
 from functools import lru_cache
 
-from backend.models import (
+from qudit_visualizer.models import (
     SimulationRequest,
     SimulationResponse,
     GateRequest,
     GateResponse,
     ComplexNumber,
 )
-from backend.wigner import phase_point_ops
+from qudit_visualizer.wigner import phase_point_ops
 
 app = FastAPI(title="Discrete Wigner Simulator")
 
@@ -32,6 +35,23 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# --- Static frontend ---
+
+BASE_DIR = Path(__file__).resolve().parent
+FRONTEND_DIST = BASE_DIR / "static"
+
+# Serve JS/CSS/assets under /qudit-visualizer/
+app.mount("/qudit-visualizer", StaticFiles(directory=FRONTEND_DIST), name="frontend")
+
+# Serve index.html at root
+@app.get("/")
+def index():
+    return FileResponse(FRONTEND_DIST / "index.html")
+# Also serve index at /qudit-visualizer/
+@app.get("/qudit-visualizer/")
+def index_qudit():
+    return FileResponse(FRONTEND_DIST / "index.html")
 
 
 @lru_cache(maxsize=16)

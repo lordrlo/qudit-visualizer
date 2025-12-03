@@ -1,23 +1,34 @@
 # Qudit Visualizer – Discrete Wigner Function
 
 This project visualizes the discrete Wigner function of a single qudit of arbitrary dimension $d \ge 2$.  
-It supports both odd and even local dimensions and provides an interactive way to explore states and dynamics directly in discrete phase space.
+It provides an interactive way to explore arbitrary states and dynamics in discrete phase space.
 
 ## Online demo
 
-A live demo of the frontend is available here:
+A live demo is available here:
 
 👉 **https://lordrlo.github.io/qudit-visualizer/**
 
-> **Performance note:** the online demo talks to a small remote backend and can be very slow for larger $d$ or long evolutions. For serious use (or just a smooth experience), you should run both backend and frontend locally, as described in the installation section.
+> **Performance note:** the online demo talks to a small remote backend and can be very slow for larger $d$ or long evolutions. For serious use (or just a smooth experience), you should run it locally.
 
-You can:
+You can: 
 
-- Define arbitrary initial states
-- Evolve them either by discrete gates or continuous time evolution under arbitrary Hamiltonians
+- Define arbitrary initial states of any finite dimension
+- Evolve them with arbitrary gates and Hamiltonians
 - Inspect the resulting Wigner function $W(q,p,t)$
 
 ---
+
+## Quick start
+
+Install from PyPI with
+
+```bash
+pip install qudit-visualizer
+qudit-visualizer
+```
+
+and enjoy! The website will open at http://localhost:8000. 
 
 ## Features
 
@@ -84,7 +95,7 @@ using Dynamiqs on top of JAX.
   - Final time $t_{\max}$,
 - Hamiltonian choices:
   - **Preset**: diagonal quadratic spectrum $H_{i,i} = i^2 / d$,
-  - **Custom**: full $d \times d$ hermitian matrix specified in the UI.
+  - **Custom**: full $d \times d$ Hermitian matrix specified in the UI.
 
 For each saved time point, the backend:
 
@@ -113,26 +124,29 @@ Repository layout (top level):
 
 ```text
 .
-├── backend/
-│   ├── app.py          # FastAPI app: endpoints, dynamics, Wigner computation
-│   ├── models.py       # Pydantic models for requests/responses
-│   └── wigner.py       # Phase–point operators A(q,p) and Wigner map
+├── qudit_visualizer/
+│   ├── __init__.py          # Package init
+│   ├── app.py               # FastAPI app: endpoints, dynamics, Wigner + static frontend
+│   ├── models.py            # Pydantic models for requests/responses
+│   ├── wigner.py            # Phase–point operators A(q,p) and Wigner map
+│   └── static/              # Prebuilt frontend bundle for packaged use
 ├── frontend/
-│   ├── .env.development    # VITE_API_BASE for local dev
-│   ├── .env.production     # VITE_API_BASE for deployed demo
+│   ├── .env.development     # VITE_API_BASE for local dev
+│   ├── .env.production      # VITE_API_BASE for GitHub Pages demo
+│   ├── .env.localapp        # VITE_API_BASE for packaged app (usually unset)
 │   ├── index.html
 │   ├── vite.config.ts
 │   └── src/
-│       ├── App.tsx             # Main React app: UI, controls, state management
-│       ├── api.ts              # Typed API client for /simulate, /apply_gate
-│       ├── config.ts           # API_BASE configuration
+│       ├── App.tsx              # Main React app: UI, controls, state management
+│       ├── api.ts               # Typed API client for /simulate, /apply_gate
+│       ├── config.ts            # API_BASE configuration
 │       ├── components/
 │       │   └── WignerHeatmap.tsx  # Canvas-based Wigner heatmap component
-│       ├── App.css, index.css  # Styling
-│       └── main.tsx            # React entry point
-├── benchmark.py        # Local benchmark script for backend performance
-├── requirements.txt    # Python backend dependencies
-└── README.md           # (This file)
+│       ├── App.css, index.css   # Styling
+│       └── main.tsx             # React entry point
+├── benchmark.py             # Local benchmark script for backend performance
+├── pyproject.toml           # Packaging config for PyPI
+└── README.md                # (This file)
 ```
 
 ---
@@ -147,14 +161,12 @@ Repository layout (top level):
 - JAX / jax.numpy – linear algebra and fast array operations
 - uvicorn – ASGI server for development and deployment
 
-Main HTTP endpoints (see `backend/app.py`):
+Main HTTP endpoints (see `qudit_visualizer/app.py`):
 
 - `POST /simulate`  
   Runs continuous time evolution with chosen Hamiltonian and initial state.
 - `POST /apply_gate`  
   Applies a single unitary gate and returns the updated state and Wigner function.
-- `GET /health`  
-  Lightweight health check.
 
 ### Frontend
 
@@ -192,9 +204,9 @@ Main HTTP endpoints (see `backend/app.py`):
    - Correct marginals (line sums reproduce measurement probabilities),
    - Possible negativity for nonclassical states.
 
-3. **Odd vs even dimension and the citation**  
+3. **Odd vs even dimension**  
 
-   - For odd $d$ there is a simple closed-form expression for $A_{q,p}$ in terms of shifts in the computational basis, which is implemented directly in the code (see the `phase_point_ops_odd` path in `backend/wigner.py`). One convenient expression is
+   - For odd $d$ there is a simple closed-form expression for $A_{q,p}$ in terms of shifts in the computational basis, which is implemented directly in the code (see the `phase_point_ops_odd` path in `wigner.py`). One convenient expression is
 
      $$A_{q,p} = \sum_{s=0}^{d-1} \omega^{2ps} \lvert q + s\rangle\langle q - s\rvert$$
 
@@ -224,81 +236,7 @@ Main HTTP endpoints (see `backend/app.py`):
 
 ---
 
-## Installation and local use
-
-> Recommended: For good performance, run the project locally instead of using the online demo.
-
-### 1. Clone the repository
-
-```bash
-git clone https://github.com/lordrlo/qudit-visualizer.git
-cd qudit-visualizer/
-```
-
----
-
-### 2. Backend setup (FastAPI + Dynamiqs)
-
-Create a virtual environment and install dependencies:
-
-```bash
-python -m venv .venv
-source .venv/bin/activate       
-pip install --upgrade pip
-pip install -r requirements.txt
-```
-
-Run the backend with uvicorn:
-
-```bash
-uvicorn backend.app:app --reload
-```
-
-By default this starts the API at `http://localhost:8000`.
-
-> If you want GPU acceleration, install a JAX/JAXLIB build compatible with your CUDA/ROCm stack before installing `dynamiqs`. The project itself does not require a GPU and works on CPU-only installs (just slower).
-
----
-
-### 3. Frontend setup (React + Vite)
-
-In a separate terminal, leaving the backend running:
-
-```bash
-cd frontend
-npm install          # or pnpm/yarn if you prefer
-npm run dev
-```
-
-This starts the Vite dev server at something like `http://localhost:5173`.
-
-The file `frontend/.env.development` already sets
-
-```bash
-VITE_API_BASE=http://localhost:8000
-```
-
-so the frontend will automatically talk to your local backend.
-
-Open the printed URL (usually `http://localhost:5173/`) in your browser.
-
----
-
-### 4. Optional: production build
-
-To build a static bundle of the frontend:
-
-```bash
-cd frontend
-npm run build
-npm run preview   # serves the built bundle locally
-```
-
-You can also deploy the contents of `frontend/dist/` to any static hosting service and set `VITE_API_BASE` to the URL of your backend (for example, on a VPS).
-
----
-
-### 5. Optional: backend benchmark
+### Optional: backend benchmark
 
 To get a quick feeling for backend-only performance:
 

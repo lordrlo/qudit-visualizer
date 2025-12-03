@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qudit-visualizer"
+version = "0.1.0"
+description = "Discrete Wigner-function visualizer for a single qudit of arbitrary dimension d."
+readme = "README.md"
+requires-python = ">=3.10,<3.13" #dynamiqs not supported above as of now
+license = { text = "MIT" } 
+
+authors = [
+  { name = "Carlo Cepollaro" }
+]
+
+dependencies = [
+  "fastapi>=0.123.5",
+  "uvicorn[standard]>=0.38.0",
+  "dynamiqs>=0.3.3",   
+  "jax>=0.6.2", 
+]
+
+[project.urls]
+Homepage = "https://github.com/lordrlo/qudit-visualizer"
+
+[project.scripts]
+qudit-visualizer = "qudit_visualizer.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["qudit_visualizer"]
+
+[tool.setuptools.package-data]
+"qudit_visualizer" = ["static/**"]

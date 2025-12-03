@@ -1,6 +1,0 @@
-fastapi
-uvicorn
-dynamiqs
-jax
-jaxlib
-numpy

@@ -9,8 +9,8 @@ import time
 import statistics as stats
 from typing import List
 
-from backend.models import SimulationRequest, GateRequest, ComplexNumber
-from backend.app import simulate, apply_gate
+from qudit_visualizer.models import SimulationRequest, GateRequest, ComplexNumber
+from qudit_visualizer.app import simulate, apply_gate
 
 
 def make_sim_request(d: int, t_max: float, n_steps: int) -> SimulationRequest:
